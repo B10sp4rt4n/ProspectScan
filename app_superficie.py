@@ -10,6 +10,8 @@ import re
 import requests
 import whois
 import concurrent.futures
+import io
+import os
 from functools import lru_cache
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple
@@ -671,9 +673,42 @@ def _detectar_columna_dominio(df: pd.DataFrame) -> Optional[str]:
 
 
 def ingesta_csv(archivo) -> List[str]:
-    """Ingesta AUP-safe: solo devuelve dominios (sin emails/personas/eventos)."""
-    df = pd.read_csv(archivo).rename(columns=lambda x: str(x).strip())
-    if df.empty:
+    """Compat: preferir ingesta_archivo()."""
+    return ingesta_archivo(archivo)
+
+
+def _leer_tabla_desde_upload(archivo) -> pd.DataFrame:
+    """Lee CSV/XLSX desde UploadedFile de Streamlit con heurísticas robustas."""
+    nombre = getattr(archivo, "name", "") or ""
+    ext = os.path.splitext(nombre)[1].lower()
+    data = archivo.getvalue() if hasattr(archivo, "getvalue") else archivo.read()
+
+    if ext == ".xlsx":
+        # Requiere openpyxl
+        return pd.read_excel(io.BytesIO(data), engine="openpyxl")
+
+    # Default: CSV
+    last_error: Optional[Exception] = None
+    for enc in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            text = data.decode(enc)
+            try:
+                return pd.read_csv(io.StringIO(text))
+            except Exception:
+                # Autodetecta separador (coma, punto y coma, tab, etc.)
+                return pd.read_csv(io.StringIO(text), sep=None, engine="python")
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise ValueError("No se pudo leer el archivo como CSV/XLSX") from last_error
+
+
+def ingesta_archivo(archivo) -> List[str]:
+    """Ingesta AUP-safe: acepta CSV/XLSX y devuelve SOLO dominios."""
+    df = _leer_tabla_desde_upload(archivo)
+    df = df.rename(columns=lambda x: str(x).strip())
+    if df is None or df.empty:
         return []
 
     col = _detectar_columna_dominio(df)
@@ -939,12 +974,17 @@ def main():
     st.set_page_config(layout="wide")
     st.title("🧠 Diagnóstico de Superficie Digital Corporativa")
 
-    archivo = st.file_uploader("Sube archivo CSV", type="csv")
+    archivo = st.file_uploader("Sube archivo CSV o Excel", type=["csv", "xlsx"])
     if not archivo:
         st.info("Carga un archivo para iniciar el diagnóstico")
         return
 
-    dominios = ingesta_csv(archivo)
+    try:
+        dominios = ingesta_archivo(archivo)
+    except Exception as e:
+        st.error("No se pudo leer el archivo. Verifica formato y contenido.")
+        st.caption(f"Detalle: {e}")
+        return
     df_resultados = analizar_dominios(dominios)
 
     if df_resultados.empty:
