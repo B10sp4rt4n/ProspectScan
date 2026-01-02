@@ -21,12 +21,6 @@ from urllib.parse import urlparse
 # CONFIGURACIÓN
 # ============================================================================
 
-st.set_page_config(
-    page_title="ProspectScan",
-    page_icon="🎯",
-    layout="wide"
-)
-
 DNS_TIMEOUT = 5
 REQUEST_TIMEOUT = 10
 MAX_WORKERS = 10
@@ -607,269 +601,359 @@ def es_corporativo(dominio: str) -> bool:
 # INTERFAZ STREAMLIT
 # ============================================================================
 
-def main():
-    # Header ejecutivo
-    st.set_page_config(page_title="Diagnóstico de Superficie Digital", page_icon="🎯", layout="wide")
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.title("🎯 ProspectScan")
-        st.markdown("**Identifica oportunidades de seguridad en tus prospectos en segundos**")
-    with col2:
-        st.image("https://via.placeholder.com/150x80/4a90e2/ffffff?text=LOGO", width=150)
-    
-    # Value proposition
-    with st.container():
-        st.markdown("""
-        <div style="background-color: #2c3e50; padding: 20px; border-radius: 10px; margin: 20px 0; color: white;">
-        <h3 style="color: white;">🚀 Para equipos de ventas y partners de ciberseguridad</h3>
-        <p style="color: white;">Analiza la postura de seguridad de tus prospectos antes de la primera llamada. 
-        Identifica gaps de correo y web que justifican tu solución.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    
-    # Upload mejorado
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        archivo = st.file_uploader(
-            "📁 Sube tu lista de prospectos (CSV)",
-            type="csv",
-            help="CSV con emails, URLs o dominios. Ej: ZoomInfo, LinkedIn, CRM export, directorios web"
-        )
-    with col2:
-        st.markdown("**Formatos aceptados:**")
-        st.markdown("• Emails: usuario@empresa.com")
-        st.markdown("• URLs: https://empresa.com")
-        st.markdown("• Dominios: empresa.com")
-        st.markdown("• Lista mixta")
-    
-    if not archivo:
-        st.info("👆 Sube tu lista de prospectos para identificar oportunidades")
-        
-        # Demo interactivo
-        with st.expander("🚀 Ver ejemplo con dominios conocidos"):
-            if st.button("Analizar Amazon, Microsoft, Dropbox"):
-                demo_dominios = ["amazon.com", "microsoft.com", "dropbox.com"]
-                st.info("Ejecutando análisis demo...")
-                # Aquí podríamos hacer el análisis real para la demo
-        
-        # Value props
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("""
-            **🎯 Casos de uso:**
-            - Calificar leads desde directorios web
-            - Analizar competidores por dominio
-            - Procesar listas de CRM con URLs
-            - Auditar proveedores y partners
-            """)
-        with col2:
-            st.markdown("""
-            **📊 Lo que obtienes:**
-            - Postura de seguridad por prospecto
-            - Vendors actuales detectados
-            - Gaps específicos identificados
-            - Recomendaciones comerciales
-            """)
-        return
-    
+# =============================
+# Contrato df_resultados
+# =============================
+
+SINONIMOS = {
+    "sin dmarc": "none",
+    "basica": "básica",
+    "avanzada": "avanzada",
+    "sin cdn": "none",
+    "microsoft": "microsoft 365",
+    "cloudflare": "cloudflare",
+}
+
+
+def normalizar_busqueda(texto: str) -> str:
+    texto = (texto or "").strip().lower()
+    return SINONIMOS.get(texto, texto)
+
+
+def _puntuar_columna_para_dominios(serie: pd.Series, max_muestra: int = 25) -> int:
+    """Devuelve un puntaje basado en cuántos valores producen dominios corporativos."""
+    if serie is None:
+        return 0
+
+    puntaje = 0
+    vistos = set()
+    for valor in serie.dropna().astype(str).head(max_muestra):
+        d = extraer_dominio(valor)
+        if d and es_corporativo(d) and d not in vistos:
+            vistos.add(d)
+            puntaje += 1
+    return puntaje
+
+
+def _detectar_columna_dominio(df: pd.DataFrame) -> Optional[str]:
+    if df is None or df.empty or df.shape[1] == 0:
+        return None
+
+    columnas = list(df.columns)
+
+    # 1) Prioridad por nombre (si existe)
+    for preferida in ("dominio", "domain"):
+        for c in columnas:
+            if str(c).strip().lower() == preferida:
+                return c
+
+    # 2) Heurística por contenido: escoger la columna con más dominios corporativos
+    mejor_col = None
+    mejor_score = 0
+    for c in columnas:
+        score = _puntuar_columna_para_dominios(df[c])
+        if score > mejor_score:
+            mejor_score = score
+            mejor_col = c
+
+    if mejor_col and mejor_score > 0:
+        return mejor_col
+
+    # 3) Fallback por keywords en el nombre
+    keywords = ("email", "correo", "mail", "url", "website", "web", "site", "domain", "dominio")
+    for c in columnas:
+        name = str(c).strip().lower()
+        if any(k in name for k in keywords):
+            return c
+
+    # 4) Último recurso: primera columna
+    return columnas[0] if columnas else None
+
+
+def ingesta_csv(archivo) -> List[str]:
+    """Ingesta AUP-safe: solo devuelve dominios (sin emails/personas/eventos)."""
+    df = pd.read_csv(archivo).rename(columns=lambda x: str(x).strip())
+    if df.empty:
+        return []
+
+    col = _detectar_columna_dominio(df)
+    if not col:
+        return []
+
+    candidatos = df[col].astype(str)
+
+    dominios = []
+    for valor in candidatos:
+        d = extraer_dominio(valor)
+        if d and es_corporativo(d):
+            dominios.append(d)
+
+    # Únicos y orden estable
+    vistos = set()
+    salida = []
+    for d in dominios:
+        if d not in vistos:
+            vistos.add(d)
+            salida.append(d)
+    return salida
+
+
+@lru_cache(maxsize=512)
+def obtener_fecha_creacion_dominio(dominio: str) -> Optional[datetime]:
     try:
-        df = pd.read_csv(archivo).rename(columns=lambda x: x.strip())
-        
-        # Detectar columna analizando las primeras 5 filas
-        def es_dato_valido(valor):
-            """Detecta si un valor es email, URL o dominio."""
-            if not isinstance(valor, str):
-                return False
-            valor = valor.strip().lower()
-            # Es email
-            if "@" in valor and "." in valor:
-                return True
-            # Es URL
-            if valor.startswith(("http://", "https://")):
-                return True
-            # Es dominio (tiene punto, no tiene espacios, parece dominio)
-            if "." in valor and " " not in valor and len(valor) > 3:
-                partes = valor.replace("www.", "").split(".")
-                if len(partes) >= 2 and len(partes[-1]) >= 2:
-                    return True
-            return False
-        
-        col_data = None
-        muestra_filas = df.head(5)
-        
-        for col in df.columns:
-            valores_validos = sum(1 for v in muestra_filas[col] if es_dato_valido(str(v)))
-            if valores_validos >= 3:  # Al menos 3 de 5 filas tienen datos válidos
-                col_data = col
-                break
-        
-        if not col_data:
-            # Fallback: buscar por nombre de columna
-            for col in df.columns:
-                col_lower = col.lower()
-                if any(kw in col_lower for kw in ['email', 'correo', 'mail', 'url', 'website', 'web', 'site', 'domain', 'dominio']):
-                    col_data = col
-                    break
-        
-        if not col_data:
-            st.error("❌ No se encontró columna con emails, URLs o dominios")
-            st.info("💡 Asegúrate de que al menos una columna tenga datos como: usuario@empresa.com, https://empresa.com o empresa.com")
-            return
-        
-        st.success(f"✅ Columna detectada: **{col_data}**")
-        
-        df["_dominio"] = df[col_data].apply(extraer_dominio)
-        dominios = [d for d in df["_dominio"].dropna().unique() if es_corporativo(d)]
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Total entradas", len(df))
-        c2.metric("Dominios personales", len(df[df["_dominio"].isin(DOMINIOS_PERSONALES)]))
-        c3.metric("Dominios corporativos", len(dominios))
-        
-        if not dominios:
-            st.warning("⚠️ No se encontraron dominios corporativos")
-            return
-        
-        st.markdown("---")
-        st.subheader("🔍 Diagnóstico en progreso")
-        
-        progreso = st.progress(0)
-        estado = st.empty()
-        resultados: List[ResultadoSuperficie] = []
-        
-        with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futuros = {executor.submit(analizar_dominio, d): d for d in dominios}
-            for i, futuro in enumerate(concurrent.futures.as_completed(futuros)):
-                dom = futuros[futuro]
-                try:
-                    resultados.append(futuro.result())
-                except Exception as e:
-                    st.warning(f"Error en {dom}: {e}")
-                progreso.progress((i + 1) / len(dominios))
-                estado.text(f"Analizando: {dom}")
-        
-        estado.text("✅ Diagnóstico completado")
-        
-        df_ejecutivo = pd.DataFrame([resultado_a_ejecutivo(r) for r in resultados])
-        df_tecnico = pd.DataFrame([resultado_a_tecnico(r) for r in resultados])
-        
-        # === RESUMEN EJECUTIVO ===
-        st.markdown("---")
-        st.subheader("� Oportunidades Comerciales Identificadas")
-        
-        # KPIs comerciales
-        total = len(resultados)
-        oportunidades = len([r for r in resultados if r.postura_general == Postura.BASICA])
-        sin_gateway = len([r for r in resultados if not r.identidad.vendors_seguridad])
-        sin_waf = len([r for r in resultados if not r.exposicion.cdn_waf])
-        
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("🎯 Total analizados", total)
-        col2.metric("🔥 Postura básica", oportunidades, help="Prospectos con mayor potencial")
-        col3.metric("📧 Sin gateway email", sin_gateway, help="Oportunidad para seguridad de correo")
-        col4.metric("🌐 Sin WAF/CDN", sin_waf, help="Oportunidad para protección web")
-        
-        # Filtros ejecutivos
-        st.markdown("#### 🎯 Prioriza tus prospectos")
-        filtro = st.selectbox(
-            "Mostrar:",
-            ["Todos los dominios", "Solo postura básica (alta prioridad)", "Sin gateway de correo", "Sin protección web"],
-            help="Filtra para enfocarte en las mejores oportunidades"
+        w = whois.whois(dominio)
+        created = w.creation_date
+        if isinstance(created, list):
+            created = min([d for d in created if isinstance(d, datetime)], default=None)
+        if isinstance(created, datetime):
+            return created
+    except Exception:
+        return None
+    return None
+
+
+def map_correo_proveedor(vendor_correo: Optional[str]) -> str:
+    if vendor_correo in ("Microsoft 365", "Google Workspace"):
+        return vendor_correo
+    return "Otro"
+
+
+def map_correo_gateway(vendors_seguridad: List[str]) -> str:
+    if not vendors_seguridad:
+        return "None"
+    # Contrato: solo Proofpoint | Mimecast | None
+    if "Proofpoint" in vendors_seguridad:
+        return "Proofpoint"
+    if "Mimecast" in vendors_seguridad:
+        return "Mimecast"
+    return "None"
+
+
+def map_correo_envio(vendors_envio: List[str]) -> str:
+    if not vendors_envio:
+        return "None"
+    # Contrato: solo SendGrid | Mailgun | None
+    if "SendGrid" in vendors_envio:
+        return "SendGrid"
+    if "Mailgun" in vendors_envio:
+        return "Mailgun"
+    return "None"
+
+
+def map_spf_estado(estado: EstadoSPF) -> str:
+    if estado == EstadoSPF.OK:
+        return "OK"
+    if estado == EstadoSPF.AUSENTE:
+        return "Ausente"
+    return "Error"
+
+
+def map_dmarc_estado(estado: EstadoDMARC) -> str:
+    if estado == EstadoDMARC.REJECT:
+        return "Reject"
+    if estado == EstadoDMARC.QUARANTINE:
+        return "Quarantine"
+    return "None"
+
+
+def map_https_estado(estado: EstadoHTTPS) -> str:
+    if estado == EstadoHTTPS.FORZADO:
+        return "Forzado"
+    if estado == EstadoHTTPS.DISPONIBLE:
+        return "Parcial"
+    return "Ausente"
+
+
+def map_cdn_waf(valor: Optional[str]) -> str:
+    if valor in ("Cloudflare", "Akamai"):
+        return valor
+    return "None"
+
+
+def map_header_bool(estado: EstadoHeader) -> bool:
+    return estado == EstadoHeader.PRESENTE
+
+
+def resultado_a_df_resultados(r: ResultadoSuperficie) -> Dict:
+    created = obtener_fecha_creacion_dominio(r.dominio)
+    fecha = created.date().isoformat() if created else "N/D"
+
+    return {
+        "dominio": r.dominio,
+        "postura_identidad": r.identidad.postura.value,
+        "postura_exposicion": r.exposicion.postura.value,
+        "postura_general": r.postura_general.value,
+        # Identidad (Correo)
+        "correo_proveedor": map_correo_proveedor(r.identidad.vendor_correo),
+        "correo_gateway": map_correo_gateway(r.identidad.vendors_seguridad),
+        "correo_envio": map_correo_envio(r.identidad.vendors_envio),
+        "spf_estado": map_spf_estado(r.identidad.estado_spf),
+        "dmarc_estado": map_dmarc_estado(r.identidad.estado_dmarc),
+        # Exposición (Web)
+        "https_estado": map_https_estado(r.exposicion.https),
+        "cdn_waf": map_cdn_waf(r.exposicion.cdn_waf),
+        "hsts": map_header_bool(r.exposicion.hsts),
+        "csp": map_header_bool(r.exposicion.csp),
+        # Contexto
+        "dominio_antiguedad": fecha,
+    }
+
+
+def analizar_dominios(dominios: List[str]) -> pd.DataFrame:
+    if not dominios:
+        return pd.DataFrame(columns=[
+            "dominio",
+            "postura_identidad",
+            "postura_exposicion",
+            "postura_general",
+            "correo_proveedor",
+            "correo_gateway",
+            "correo_envio",
+            "spf_estado",
+            "dmarc_estado",
+            "https_estado",
+            "cdn_waf",
+            "hsts",
+            "csp",
+            "dominio_antiguedad",
+        ])
+
+    resultados: List[ResultadoSuperficie] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futuros = {executor.submit(analizar_dominio, d): d for d in dominios}
+        for futuro in concurrent.futures.as_completed(futuros):
+            try:
+                resultados.append(futuro.result())
+            except Exception:
+                # Mantener el contrato: una fila por dominio; si falla, omitimos el dominio.
+                continue
+
+    df_resultados = pd.DataFrame([resultado_a_df_resultados(r) for r in resultados])
+    if not df_resultados.empty:
+        df_resultados = df_resultados.sort_values("dominio").reset_index(drop=True)
+    return df_resultados
+
+
+def vista_global(df: pd.DataFrame):
+    st.subheader("🌍 Resumen Global")
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Dominios", len(df))
+    col2.metric("Postura Básica", int((df.postura_general == "Básica").sum()))
+    col3.metric("Postura Avanzada", int((df.postura_general == "Avanzada").sum()))
+
+
+def aplicar_busqueda(df: pd.DataFrame, texto: str) -> pd.DataFrame:
+    texto = normalizar_busqueda(texto)
+    if not texto:
+        return df
+
+    return df[
+        df.apply(
+            lambda row: texto in " ".join(str(v).lower() for v in row.values),
+            axis=1,
         )
-        
-        df_mostrar = df_ejecutivo.copy()
-        if filtro == "Solo postura básica (alta prioridad)":
-            df_mostrar = df_mostrar[df_mostrar["Superficie Digital"] == "Básica"]
-        elif filtro == "Sin gateway de correo":
-            df_mostrar = df_mostrar[df_mostrar["Seguridad Correo"] == "Sin gateway"]
-        elif filtro == "Sin protección web":
-            df_mostrar = df_mostrar[df_mostrar["CDN/WAF"] == "Sin protección"]
-        
-        # Tabla: fondo negro + letras blancas (y un ícono de color por estado)
-        if not df_mostrar.empty:
-            df_display = df_mostrar.copy()
+    ]
 
-            iconos = {
-                "Básica": "🔴",
-                "Intermedia": "🟡",
-                "Avanzada": "🟢",
-            }
-            df_display.insert(
-                0,
-                "Estado",
-                df_display["Superficie Digital"].map(iconos).fillna("⚪"),
-            )
 
-            styler = (
-                df_display.style
-                .set_properties(**{"background-color": "#0e1117", "color": "#ffffff"})
-                .set_table_styles(
-                    [
-                        {"selector": "th", "props": [("background-color", "#0e1117"), ("color", "#ffffff")]},
-                        {"selector": "td", "props": [("background-color", "#0e1117"), ("color", "#ffffff")]},
-                    ]
-                )
-            )
+def aplicar_filtros(df: pd.DataFrame) -> pd.DataFrame:
+    if st.checkbox("Solo postura básica"):
+        df = df[df.postura_general == "Básica"]
 
-            st.dataframe(styler, use_container_width=True, hide_index=True)
-        else:
-            st.warning("No hay dominios que cumplan el filtro seleccionado")
-        
-        # Call to action
-        st.markdown("""
-        <div style="background-color: #27ae60; color: white; font-weight: bold; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        💡 <strong>Próximo paso:</strong> Contacta los dominios con postura "Básica" - 
-        tienen los mayores gaps de seguridad y necesidad de tus soluciones.
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Exportación comercial
-        col1, col2 = st.columns(2)
-        with col1:
-            csv_ej = df_ejecutivo.to_csv(index=False).encode("utf-8")
-            st.download_button(
-                "📥 Exportar Lista de Prospectos", 
-                csv_ej, 
-                f"oportunidades_comerciales_{datetime.now().strftime('%Y%m%d')}.csv", 
-                "text/csv",
-                help="CSV listo para importar a tu CRM"
-            )
-        with col2:
-            # Template de email
-            template_email = """Hola [NOMBRE],
+    if st.checkbox("Sin DMARC activo"):
+        df = df[df.dmarc_estado != "Reject"]
 
-Hice un análisis de seguridad de [DOMINIO] y encontré algunas oportunidades:
+    if st.checkbox("Asimetría correo / web"):
+        df = df[df.postura_identidad != df.postura_exposicion]
 
-• [GAPS_DETECTADOS]
+    return df
 
-¿Tienes 15 minutos esta semana para revisar los hallazgos?
 
-Saludos,
-[TU_NOMBRE]"""
-            
-            st.download_button(
-                "📧 Template de Email", 
-                template_email.encode("utf-8"), 
-                "template_prospecting.txt", 
-                "text/plain",
-                help="Plantilla para contactar prospectos"
-            )
-        
-        # === ANEXO TÉCNICO ===
-        st.markdown("---")
-        st.subheader("🔧 Anexo Técnico")
-        
-        with st.expander("Ver detalle técnico completo"):
-            st.dataframe(df_tecnico, use_container_width=True, hide_index=True)
-        
-        csv_tec = df_tecnico.to_csv(index=False).encode("utf-8")
-        st.download_button("📥 Descargar Anexo Técnico", csv_tec, "anexo_tecnico_superficie.csv", "text/csv")
-        
-    except Exception as e:
-        st.error(f"❌ Error: {str(e)}")
+def vista_lista_explorable(df: pd.DataFrame):
+    st.subheader("🔎 Exploración de Dominios")
+
+    busqueda = st.text_input("Búsqueda inteligente")
+    df_filtrado = aplicar_busqueda(df, busqueda)
+    df_filtrado = aplicar_filtros(df_filtrado)
+
+    st.dataframe(
+        df_filtrado[["dominio", "postura_general", "correo_proveedor", "cdn_waf"]],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    if df_filtrado.empty:
+        st.session_state.pop("dominio_activo", None)
+        return
+
+    dominio = st.selectbox(
+        "Selecciona un dominio para ver detalle",
+        df_filtrado["dominio"].tolist(),
+    )
+
+    st.session_state["dominio_activo"] = dominio
+
+
+def generar_recomendaciones(row: pd.Series) -> List[str]:
+    recs: List[str] = []
+
+    if row.get("dmarc_estado") != "Reject":
+        recs.append("Activar DMARC en modo Quarantine/Reject para proteger la identidad del dominio.")
+    if row.get("spf_estado") != "OK":
+        recs.append("Corregir y endurecer SPF para reducir suplantación de remitentes.")
+    if row.get("correo_gateway") == "None":
+        recs.append("Evaluar un gateway de seguridad de correo (ej. Proofpoint/Mimecast).")
+
+    if row.get("https_estado") != "Forzado":
+        recs.append("Forzar HTTPS en todo el sitio para evitar downgrade y tráfico inseguro.")
+    if not bool(row.get("hsts")):
+        recs.append("Habilitar HSTS para reforzar HTTPS.")
+    if not bool(row.get("csp")):
+        recs.append("Implementar CSP para mitigar inyección de scripts.")
+    if row.get("cdn_waf") == "None":
+        recs.append("Considerar CDN/WAF (ej. Cloudflare/Akamai) para protección web.")
+
+    return recs
+
+
+def vista_dominio(df: pd.DataFrame):
+    dominio = st.session_state.get("dominio_activo")
+    if not dominio:
+        return
+
+    row = df[df.dominio == dominio].iloc[0]
+    st.subheader(f"📌 Dominio: {dominio}")
+
+    st.markdown("### ✉️ Identidad Digital (Correo)")
+    st.write(row.correo_proveedor, row.spf_estado, row.dmarc_estado)
+
+    st.markdown("### 🌐 Exposición Digital (Web)")
+    st.write(row.https_estado, row.cdn_waf)
+
+    st.markdown("### ✅ Recomendaciones")
+    for r in generar_recomendaciones(row):
+        st.write(f"- {r}")
+
+
+def main():
+    st.set_page_config(layout="wide")
+    st.title("🧠 Diagnóstico de Superficie Digital Corporativa")
+
+    archivo = st.file_uploader("Sube archivo CSV", type="csv")
+    if not archivo:
+        st.info("Carga un archivo para iniciar el diagnóstico")
+        return
+
+    dominios = ingesta_csv(archivo)
+    df_resultados = analizar_dominios(dominios)
+
+    if df_resultados.empty:
+        st.warning("No se pudieron analizar dominios válidos desde el CSV")
+        return
+
+    vista_global(df_resultados)
+    vista_lista_explorable(df_resultados)
+    vista_dominio(df_resultados)
 
 
 if __name__ == "__main__":
