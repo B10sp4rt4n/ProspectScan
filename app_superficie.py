@@ -658,7 +658,7 @@ def _detectar_columna_dominio(df: pd.DataFrame) -> Optional[str]:
             mejor_score = score
             mejor_col = c
 
-    if mejor_col and mejor_score > 0:
+    if mejor_col and mejor_score >= 1:
         return mejor_col
 
     # 3) Fallback por keywords en el nombre
@@ -859,8 +859,9 @@ def analizar_dominios(dominios: List[str]) -> pd.DataFrame:
         for futuro in concurrent.futures.as_completed(futuros):
             try:
                 resultados.append(futuro.result())
-            except Exception:
-                # Mantener el contrato: una fila por dominio; si falla, omitimos el dominio.
+            except Exception as e:
+                dom = futuros[futuro]
+                st.warning(f"Fallo analizando {dom}: {e}")
                 continue
 
     df_resultados = pd.DataFrame([resultado_a_df_resultados(r) for r in resultados])
@@ -870,12 +871,13 @@ def analizar_dominios(dominios: List[str]) -> pd.DataFrame:
 
 
 def vista_global(df: pd.DataFrame):
-    st.subheader("🌍 Resumen Global")
+    st.markdown("## 🌍 Resumen Global")
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Dominios", len(df))
-    col2.metric("Postura Básica", int((df.postura_general == "Básica").sum()))
-    col3.metric("Postura Avanzada", int((df.postura_general == "Avanzada").sum()))
+    with st.container():
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Dominios", len(df))
+        col2.metric("Postura Básica", int((df.postura_general == "Básica").sum()))
+        col3.metric("Postura Avanzada", int((df.postura_general == "Avanzada").sum()))
 
 
 def aplicar_busqueda(df: pd.DataFrame, texto: str) -> pd.DataFrame:
@@ -915,6 +917,7 @@ def vista_lista_explorable(df: pd.DataFrame):
         df_filtrado[["dominio", "postura_general", "correo_proveedor", "cdn_waf"]],
         use_container_width=True,
         hide_index=True,
+        height=400,
     )
 
     if df_filtrado.empty:
