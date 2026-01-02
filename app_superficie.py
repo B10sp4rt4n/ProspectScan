@@ -792,9 +792,9 @@ def main():
         if not df_mostrar.empty:
             st.dataframe(
                 df_mostrar.style.applymap(
-                    lambda x: 'background-color: #ffebee' if x == 'Básica' 
-                    else 'background-color: #fff3e0' if x == 'Intermedia'
-                    else 'background-color: #e8f5e8' if x == 'Avanzada'
+                    lambda x: 'background-color: #e74c3c; color: white; font-weight: bold' if x == 'Básica' 
+                    else 'background-color: #f39c12; color: white; font-weight: bold' if x == 'Intermedia'
+                    else 'background-color: #27ae60; color: white; font-weight: bold' if x == 'Avanzada'
                     else '',
                     subset=['Superficie Digital']
                 ),
@@ -806,7 +806,7 @@ def main():
         
         # Call to action
         st.markdown("""
-        <div style="background-color: #e8f5e8; padding: 15px; border-radius: 5px; margin: 20px 0;">
+        <div style="background-color: #27ae60; color: white; font-weight: bold; padding: 15px; border-radius: 5px; margin: 20px 0;">
         💡 <strong>Próximo paso:</strong> Contacta los dominios con postura "Básica" - 
         tienen los mayores gaps de seguridad y necesidad de tus soluciones.
         </div>
