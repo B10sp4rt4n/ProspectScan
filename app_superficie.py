@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple
 from enum import Enum
 from datetime import datetime
+from urllib.parse import urlparse
 
 # ============================================================================
 # CONFIGURACIÓN
@@ -567,9 +568,34 @@ def validar_email(email: str) -> bool:
     return bool(re.match(r'^[\w\.\-\+]+@[a-zA-Z\d\.\-]+\.[a-zA-Z]{2,}$', email))
 
 
-def extraer_dominio(email: str) -> str:
-    if validar_email(email):
-        return email.split("@")[-1].lower().strip()
+def extraer_dominio(url_o_email: str) -> str:
+    """Extrae el dominio de una URL o email."""
+    if not isinstance(url_o_email, str):
+        return ""
+    
+    url_o_email = url_o_email.strip().lower()
+    
+    # Si es email
+    if "@" in url_o_email and validar_email(url_o_email):
+        return url_o_email.split("@")[-1]
+    
+    # Si es URL
+    if url_o_email.startswith(("http://", "https://")):
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url_o_email)
+            return parsed.netloc.replace("www.", "")
+        except:
+            pass
+    
+    # Si es dominio directo (ej: empresa.com)
+    if "." in url_o_email and not " " in url_o_email:
+        # Limpiar www. si existe
+        dominio = url_o_email.replace("www.", "")
+        # Limpiar trailing slash
+        dominio = dominio.rstrip("/")
+        return dominio
+    
     return ""
 
 
@@ -610,14 +636,14 @@ def main():
         archivo = st.file_uploader(
             "📁 Sube tu lista de prospectos (CSV)",
             type="csv",
-            help="CSV con columna de correos corporativos. Ej: ZoomInfo, LinkedIn, CRM export"
+            help="CSV con emails, URLs o dominios. Ej: ZoomInfo, LinkedIn, CRM export, directorios web"
         )
     with col2:
-        st.markdown("**Ejemplos de uso:**")
-        st.markdown("• Lista de prospectos de LinkedIn")
-        st.markdown("• Exportación de CRM")
-        st.markdown("• Base de partners/resellers")
-        st.markdown("• Leads de marketing")
+        st.markdown("**Formatos aceptados:**")
+        st.markdown("• Emails: usuario@empresa.com")
+        st.markdown("• URLs: https://empresa.com")
+        st.markdown("• Dominios: empresa.com")
+        st.markdown("• Lista mixta")
     
     if not archivo:
         st.info("👆 Sube tu lista de prospectos para identificar oportunidades")
@@ -634,10 +660,10 @@ def main():
         with col1:
             st.markdown("""
             **🎯 Casos de uso:**
-            - Calificar leads antes de llamadas
-            - Priorizar prospectos por gaps de seguridad
-            - Preparar argumentos técnicos de venta
-            - Reportes para partners/resellers
+            - Calificar leads desde directorios web
+            - Analizar competidores por dominio
+            - Procesar listas de CRM con URLs
+            - Auditar proveedores y partners
             """)
         with col2:
             st.markdown("""
@@ -660,12 +686,12 @@ def main():
         col_email = email_cols[0]
         st.success(f"✅ Columna detectada: **{col_email}**")
         
-        df["_dominio"] = df[col_email].apply(extraer_dominio)
+        df["_dominio"] = df[col_data].apply(extraer_dominio)
         dominios = [d for d in df["_dominio"].dropna().unique() if es_corporativo(d)]
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Total emails", len(df))
-        c2.metric("Emails personales", len(df[df["_dominio"].isin(DOMINIOS_PERSONALES)]))
+        c1.metric("Total entradas", len(df))
+        c2.metric("Dominios personales", len(df[df["_dominio"].isin(DOMINIOS_PERSONALES)]))
         c3.metric("Dominios corporativos", len(dominios))
         
         if not dominios:
