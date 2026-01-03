@@ -766,6 +766,62 @@ def obtener_fecha_creacion_dominio(dominio: str) -> Optional[datetime]:
     return None
 
 
+def calcular_score_seguridad(row) -> int:
+    """Calcula score de seguridad 0-100 basado en controles implementados."""
+    score = 0
+    
+    # Identidad (50 puntos máx)
+    if row.get("spf_estado") == "OK":
+        score += 15
+    elif row.get("spf_estado") == "Débil":
+        score += 5
+    
+    if row.get("dmarc_estado") == "Reject":
+        score += 25
+    elif row.get("dmarc_estado") == "Quarantine":
+        score += 15
+    elif row.get("dmarc_estado") == "None":
+        score += 5
+    
+    if row.get("correo_gateway") != "None":
+        score += 10
+    
+    # Exposición (50 puntos máx)
+    if row.get("https_estado") == "Forzado":
+        score += 15
+    elif row.get("https_estado") == "Parcial":
+        score += 5
+    
+    if row.get("hsts"):
+        score += 10
+    
+    if row.get("csp"):
+        score += 10
+    
+    if row.get("cdn_waf") != "None":
+        score += 15
+    
+    return min(score, 100)
+
+
+def get_score_color(score: int) -> str:
+    """Retorna color basado en el score."""
+    if score >= 70:
+        return "#4ECDC4"  # Verde
+    elif score >= 40:
+        return "#FFE66D"  # Amarillo
+    return "#FF6B6B"  # Rojo
+
+
+def get_score_emoji(score: int) -> str:
+    """Retorna emoji basado en el score."""
+    if score >= 70:
+        return "🟢"
+    elif score >= 40:
+        return "🟡"
+    return "🔴"
+
+
 def map_correo_proveedor(vendor_correo: Optional[str]) -> str:
     if vendor_correo in ("Microsoft 365", "Google Workspace"):
         return vendor_correo
@@ -832,7 +888,7 @@ def resultado_a_df_resultados(r: ResultadoSuperficie) -> Dict:
     created = obtener_fecha_creacion_dominio(r.dominio)
     fecha = created.date().isoformat() if created else "N/D"
 
-    return {
+    row_data = {
         "dominio": r.dominio,
         "postura_identidad": r.identidad.postura.value,
         "postura_exposicion": r.exposicion.postura.value,
@@ -851,10 +907,14 @@ def resultado_a_df_resultados(r: ResultadoSuperficie) -> Dict:
         # Contexto
         "dominio_antiguedad": fecha,
     }
+    # Calcular score
+    row_data["score"] = calcular_score_seguridad(row_data)
+    return row_data
 
 
 DF_RESULT_COLUMNS = [
     "dominio",
+    "score",
     "postura_identidad",
     "postura_exposicion",
     "postura_general",
@@ -1083,13 +1143,26 @@ def vista_global(df: pd.DataFrame):
     sin_waf = int((df.cdn_waf == "None").sum())
     avanzada = int((df.postura_general == "Avanzada").sum())
     sin_dmarc = int((df.dmarc_estado != "Reject").sum())
+    
+    # Score promedio si existe la columna
+    score_promedio = df["score"].mean() if "score" in df.columns else 0
+    score_emoji = get_score_emoji(int(score_promedio)) if score_promedio else "⚪"
 
+    # Fila 1: Métricas principales con score
     with st.container():
-        col1, col2, col3, col4 = st.columns(4)
+        col0, col1, col2, col3, col4 = st.columns([1.2, 1, 1, 1, 1])
+        col0.metric(f"{score_emoji} Score Promedio", f"{score_promedio:.0f}/100", help="Promedio de seguridad del portafolio")
         col1.metric("🎯 Total analizados", total)
         col2.metric("🔥 Postura básica", basica, help="Prospectos con mayor potencial")
         col3.metric("📧 Sin gateway email", sin_gateway, help="Oportunidad para seguridad de correo")
         col4.metric("🌐 Sin WAF/CDN", sin_waf, help="Oportunidad para protección web")
+
+    # Alertas críticas
+    criticos = df[df["score"] < 30] if "score" in df.columns else pd.DataFrame()
+    if not criticos.empty:
+        with st.expander(f"🚨 {len(criticos)} dominios CRÍTICOS (score < 30)", expanded=False):
+            for _, row in criticos.iterrows():
+                st.markdown(f"- **{row['dominio']}** - Score: {row['score']}/100 | DMARC: {row['dmarc_estado']} | WAF: {row['cdn_waf']}")
 
     with st.container():
         col1, col2, col3, col4 = st.columns(4)
@@ -1140,31 +1213,75 @@ def vista_lista_explorable(df: pd.DataFrame):
     st.caption(f"Total: {len(df)} dominios")
 
     # Búsqueda y filtros
-    busqueda = st.text_input("Búsqueda inteligente")
+    col_busq, col_orden = st.columns([3, 1])
+    with col_busq:
+        busqueda = st.text_input("Búsqueda inteligente", placeholder="Buscar por dominio, proveedor...")
+    with col_orden:
+        orden = st.selectbox("Ordenar por", ["Score ↑", "Score ↓", "Dominio A-Z"], label_visibility="collapsed")
+    
     df_filtrado = aplicar_busqueda(df, busqueda)
     df_filtrado = aplicar_filtros(df_filtrado)
+    
+    # Aplicar ordenamiento
+    if "score" in df_filtrado.columns:
+        if orden == "Score ↑":
+            df_filtrado = df_filtrado.sort_values("score", ascending=True)
+        elif orden == "Score ↓":
+            df_filtrado = df_filtrado.sort_values("score", ascending=False)
+        else:
+            df_filtrado = df_filtrado.sort_values("dominio")
 
     # Indicar si hay filtros activos
     if len(df_filtrado) < len(df):
         st.info(f"Mostrando {len(df_filtrado)} de {len(df)} dominios (filtros activos)")
 
+    # Columnas a mostrar (con score si existe)
+    cols_mostrar = ["dominio", "score", "postura_general", "correo_proveedor", "cdn_waf"] if "score" in df_filtrado.columns else ["dominio", "postura_general", "correo_proveedor", "cdn_waf"]
+    
     st.dataframe(
-        df_filtrado[["dominio", "postura_general", "correo_proveedor", "cdn_waf"]],
+        df_filtrado[cols_mostrar],
         width="stretch",
         hide_index=True,
         height=400,
+        column_config={
+            "dominio": st.column_config.TextColumn("Dominio", width="medium"),
+            "score": st.column_config.ProgressColumn(
+                "Score",
+                help="Score de seguridad 0-100",
+                format="%d",
+                min_value=0,
+                max_value=100,
+            ),
+            "postura_general": st.column_config.TextColumn("Postura", width="small"),
+            "correo_proveedor": st.column_config.TextColumn("Email", width="small"),
+            "cdn_waf": st.column_config.TextColumn("CDN/WAF", width="small"),
+        }
     )
 
     if df_filtrado.empty:
         st.session_state.pop("dominio_activo", None)
         return
 
-    dominio = st.selectbox(
-        "Selecciona un dominio para ver detalle",
-        df_filtrado["dominio"].tolist(),
-    )
-
-    st.session_state["dominio_activo"] = dominio
+    # Selección para detalle o comparación
+    st.markdown("---")
+    col_sel, col_comp = st.columns([2, 1])
+    
+    with col_sel:
+        dominio = st.selectbox(
+            "Selecciona un dominio para ver detalle",
+            df_filtrado["dominio"].tolist(),
+        )
+        st.session_state["dominio_activo"] = dominio
+    
+    with col_comp:
+        comparar = st.multiselect(
+            "Comparar dominios",
+            df_filtrado["dominio"].tolist(),
+            max_selections=3,
+            help="Selecciona hasta 3 dominios para comparar"
+        )
+        if len(comparar) >= 2:
+            st.session_state["dominios_comparar"] = comparar
 
 
 def generar_recomendaciones_fila(row: pd.Series) -> List[str]:
@@ -1189,34 +1306,161 @@ def generar_recomendaciones_fila(row: pd.Series) -> List[str]:
     return recs
 
 
+def vista_comparativa(df: pd.DataFrame):
+    """Muestra comparativa lado a lado de dominios seleccionados."""
+    dominios = st.session_state.get("dominios_comparar", [])
+    if len(dominios) < 2:
+        return
+    
+    st.markdown("### 🔄 Comparativa de Dominios")
+    
+    cols = st.columns(len(dominios))
+    for i, dom in enumerate(dominios):
+        row = df[df.dominio == dom]
+        if row.empty:
+            continue
+        row = row.iloc[0]
+        
+        with cols[i]:
+            score = row.get("score", 0)
+            emoji = get_score_emoji(score)
+            st.markdown(f"#### {emoji} {dom}")
+            st.metric("Score", f"{score}/100")
+            
+            # Gauge visual simple
+            st.progress(score / 100)
+            
+            st.caption("**Identidad**")
+            st.write(f"📧 {row.correo_proveedor}")
+            st.write(f"SPF: {'✅' if row.spf_estado == 'OK' else '❌'}")
+            st.write(f"DMARC: {'✅' if row.dmarc_estado == 'Reject' else '⚠️' if row.dmarc_estado == 'Quarantine' else '❌'}")
+            
+            st.caption("**Exposición**")
+            st.write(f"HTTPS: {'✅' if row.https_estado == 'Forzado' else '❌'}")
+            st.write(f"CDN/WAF: {row.cdn_waf if row.cdn_waf != 'None' else '❌'}")
+    
+    st.markdown("---")
+
+
 def vista_dominio(df: pd.DataFrame):
+    # Primero mostrar comparativa si hay dominios seleccionados
+    vista_comparativa(df)
+    
     dominio = st.session_state.get("dominio_activo")
     if not dominio:
         return
 
-    row = df[df.dominio == dominio].iloc[0]
-    st.subheader(f"📌 Dominio: {dominio}")
+    row = df[df.dominio == dominio]
+    if row.empty:
+        return
+    row = row.iloc[0]
+    
+    # Encabezado con score visual
+    score = row.get("score", 0) if "score" in df.columns else calcular_score_seguridad(row.to_dict())
+    emoji = get_score_emoji(score)
+    
+    st.markdown(f"### {emoji} Detalle: **{dominio}**")
+    
+    # Score gauge prominente
+    col_score, col_info = st.columns([1, 3])
+    with col_score:
+        st.metric("Score de Seguridad", f"{score}/100")
+        st.progress(score / 100)
+        if score < 30:
+            st.error("⚠️ Riesgo crítico")
+        elif score < 50:
+            st.warning("⚡ Necesita atención")
+        else:
+            st.success("✅ Postura aceptable")
+    
+    with col_info:
+        st.markdown(f"""
+        | Aspecto | Valor |
+        |---------|-------|
+        | **Postura General** | {row.postura_general} |
+        | **Antigüedad** | {row.dominio_antiguedad} |
+        """)
 
-    st.markdown("### ✉️ Identidad Digital (Correo)")
-    st.write(row.correo_proveedor, row.spf_estado, row.dmarc_estado)
+    # Detalles en dos columnas
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.markdown("#### ✉️ Identidad Digital (Correo)")
+        st.write(f"**Proveedor:** {row.correo_proveedor}")
+        st.write(f"**SPF:** {'✅ ' + row.spf_estado if row.spf_estado == 'OK' else '❌ ' + row.spf_estado}")
+        st.write(f"**DMARC:** {'✅ ' if row.dmarc_estado == 'Reject' else '⚠️ ' if row.dmarc_estado == 'Quarantine' else '❌ '}{row.dmarc_estado}")
+        st.write(f"**Gateway:** {row.correo_gateway if row.correo_gateway != 'None' else '❌ Sin gateway'}")
+        st.write(f"**Envío:** {row.correo_envio if row.correo_envio != 'None' else '—'}")
 
-    st.markdown("### 🌐 Exposición Digital (Web)")
-    st.write(row.https_estado, row.cdn_waf)
+    with col2:
+        st.markdown("#### 🌐 Exposición Digital (Web)")
+        st.write(f"**HTTPS:** {'✅ ' if row.https_estado == 'Forzado' else '⚠️ ' if row.https_estado == 'Parcial' else '❌ '}{row.https_estado}")
+        st.write(f"**CDN/WAF:** {row.cdn_waf if row.cdn_waf != 'None' else '❌ Sin protección'}")
+        st.write(f"**HSTS:** {'✅ Activo' if row.hsts else '❌ Ausente'}")
+        st.write(f"**CSP:** {'✅ Activo' if row.csp else '❌ Ausente'}")
 
-    st.markdown("### ✅ Recomendaciones")
-    for r in generar_recomendaciones_fila(row):
-        st.write(f"- {r}")
+    # Recomendaciones
+    recs = generar_recomendaciones_fila(row)
+    if recs:
+        st.markdown("#### 📋 Recomendaciones de Mejora")
+        for i, r in enumerate(recs, 1):
+            st.write(f"{i}. {r}")
 
 
 def main():
-    st.set_page_config(layout="wide")
-    st.title("🧠 Diagnóstico de Superficie Digital Corporativa")
+    st.set_page_config(layout="wide", page_title="ProspectScan - Diagnóstico de Seguridad")
+    st.title("🧠 ProspectScan - Diagnóstico de Superficie Digital")
 
     # Tabs: Análisis masivo vs Consulta rápida
     tab1, tab2, tab3 = st.tabs(["📁 Cargar archivo", "🔍 Dominio único", "📊 Reportes (cache)"])
 
     with tab1:
+        # Quick Start cuando no hay archivo
         archivo = st.file_uploader("Sube archivo CSV o Excel", type=["csv", "xlsx"])
+        
+        if not archivo:
+            st.markdown("---")
+            col_intro, col_stats = st.columns([2, 1])
+            
+            with col_intro:
+                st.markdown("""
+                ### 🚀 Quick Start
+                
+                **¿Qué analiza ProspectScan?**
+                - ✉️ **Identidad Digital:** SPF, DMARC, proveedor de email, gateways de seguridad
+                - 🌐 **Exposición Web:** HTTPS, HSTS, CSP, CDN/WAF
+                - 📊 **Score 0-100:** Puntuación objetiva de postura de seguridad
+                
+                **Formato del archivo:**
+                - CSV o Excel (.xlsx)
+                - Una columna con dominios o emails corporativos
+                - Se extraen automáticamente los dominios únicos
+                
+                **Ejemplo de contenido:**
+                ```
+                dominio
+                empresa1.com
+                contacto@empresa2.mx
+                https://www.empresa3.com/pagina
+                ```
+                """)
+            
+            with col_stats:
+                if CACHE_AVAILABLE:
+                    stats = get_cache_stats()
+                    if stats.get("connected"):
+                        st.markdown("### 📦 Tu Base de Datos")
+                        st.metric("Dominios en cache", stats.get("total", 0))
+                        st.metric("Listos para reportes", stats.get("fresh", 0))
+                        st.caption("Ve a la pestaña **Reportes** para explorar")
+                    else:
+                        st.info("💡 Conecta Neon DB para persistir análisis")
+                else:
+                    st.info("💡 Configura DATABASE_URL para guardar análisis")
+            
+            return  # Salir temprano si no hay archivo
+        
+        # Archivo cargado: procesar
         if archivo:
             # Evitar re-análisis en cada rerun: verificar si el archivo cambió
             archivo_id = f"{archivo.name}_{archivo.size}"
@@ -1254,16 +1498,26 @@ def main():
             st.session_state.pop("df_resultados_last", None)
 
     with tab2:
-        st.markdown("### Consulta un dominio específico")
-        dominio_input = st.text_input("Dominio (ej: empresa.com)", key="single_domain")
+        st.markdown("### 🔍 Consulta un dominio específico")
+        
+        col_input, col_btn = st.columns([3, 1])
+        with col_input:
+            dominio_input = st.text_input(
+                "Dominio corporativo",
+                placeholder="empresa.com o contacto@empresa.com",
+                key="single_domain",
+                label_visibility="collapsed"
+            )
+        with col_btn:
+            analizar_btn = st.button("🔎 Analizar", type="primary", use_container_width=True)
 
         if dominio_input:
             dominio_limpio = extraer_dominio(dominio_input)
             if not dominio_limpio:
-                st.error("Dominio no válido")
+                st.error("❌ Dominio no válido. Ingresa un dominio como: empresa.com")
             elif not es_corporativo(dominio_limpio):
-                st.warning("Ese es un dominio personal (Gmail, Hotmail, etc.)")
-            else:
+                st.warning("⚠️ Ese es un dominio personal (Gmail, Hotmail, etc.). Ingresa un dominio corporativo.")
+            elif analizar_btn or st.session_state.get("single_domain_last") == dominio_limpio:
                 # Evitar re-análisis en cada rerun: si el dominio no cambió, reutiliza.
                 if (
                     st.session_state.get("single_domain_last") == dominio_limpio
@@ -1294,7 +1548,7 @@ def main():
 
                     # 2) Re-análisis solo si no hay cache
                     if df_single.empty:
-                        with st.spinner(f"Analizando {dominio_limpio}..."):
+                        with st.spinner(f"🔍 Analizando {dominio_limpio}..."):
                             df_single = analizar_dominios([dominio_limpio])
 
                     # Persistir en sesión para evitar reruns costosos
@@ -1304,30 +1558,57 @@ def main():
 
                 if not df_single.empty:
                     row = df_single.iloc[0]
-                    st.subheader(f"📌 {dominio_limpio}")
+                    
+                    # Score visual prominente
+                    score = row.get("score", 0) if "score" in df_single.columns else calcular_score_seguridad(row.to_dict())
+                    emoji = get_score_emoji(score)
+                    
+                    st.markdown(f"### {emoji} **{dominio_limpio}**")
+                    
+                    # Encabezado con score gauge
+                    col_score, col_postura = st.columns([1, 2])
+                    with col_score:
+                        st.metric("Score de Seguridad", f"{score}/100")
+                        st.progress(score / 100)
+                        if score < 30:
+                            st.error("⚠️ Riesgo crítico")
+                        elif score < 50:
+                            st.warning("⚡ Necesita atención")
+                        elif score < 70:
+                            st.info("📊 Postura intermedia")
+                        else:
+                            st.success("✅ Buena postura")
+                    
+                    with col_postura:
+                        st.metric("Postura General", row.postura_general)
+                        st.caption(f"Identidad: {row.postura_identidad} | Exposición: {row.postura_exposicion}")
 
+                    st.markdown("---")
                     col1, col2 = st.columns(2)
                     with col1:
                         st.markdown("#### ✉️ Identidad (Correo)")
-                        st.metric("Postura", row.postura_identidad)
                         st.write(f"**Proveedor:** {row.correo_proveedor}")
-                        st.write(f"**SPF:** {row.spf_estado}")
-                        st.write(f"**DMARC:** {row.dmarc_estado}")
-                        st.write(f"**Gateway:** {row.correo_gateway}")
+                        st.write(f"**SPF:** {'✅ ' if row.spf_estado == 'OK' else '❌ '}{row.spf_estado}")
+                        st.write(f"**DMARC:** {'✅ ' if row.dmarc_estado == 'Reject' else '⚠️ ' if row.dmarc_estado == 'Quarantine' else '❌ '}{row.dmarc_estado}")
+                        st.write(f"**Gateway:** {row.correo_gateway if row.correo_gateway != 'None' else '❌ Sin gateway'}")
 
                     with col2:
                         st.markdown("#### 🌐 Exposición (Web)")
-                        st.metric("Postura", row.postura_exposicion)
-                        st.write(f"**HTTPS:** {row.https_estado}")
-                        st.write(f"**CDN/WAF:** {row.cdn_waf}")
-                        st.write(f"**HSTS:** {'✅' if row.hsts else '❌'}")
-                        st.write(f"**CSP:** {'✅' if row.csp else '❌'}")
+                        st.write(f"**HTTPS:** {'✅ ' if row.https_estado == 'Forzado' else '❌ '}{row.https_estado}")
+                        st.write(f"**CDN/WAF:** {row.cdn_waf if row.cdn_waf != 'None' else '❌ Sin protección'}")
+                        st.write(f"**HSTS:** {'✅ Activo' if row.hsts else '❌ Ausente'}")
+                        st.write(f"**CSP:** {'✅ Activo' if row.csp else '❌ Ausente'}")
 
-                    st.markdown("#### ✅ Recomendaciones")
-                    for r in generar_recomendaciones_fila(row):
-                        st.write(f"- {r}")
+                    # Recomendaciones
+                    recs = generar_recomendaciones_fila(row)
+                    if recs:
+                        st.markdown("#### 📋 Recomendaciones")
+                        for i, r in enumerate(recs, 1):
+                            st.write(f"{i}. {r}")
                 else:
                     st.error("No se pudo analizar el dominio")
+        else:
+            st.caption("Ingresa un dominio corporativo y presiona **Analizar**")
 
     with tab3:
         if not CACHE_AVAILABLE:

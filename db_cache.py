@@ -15,6 +15,7 @@ CACHE_TTL_DAYS = int(os.environ.get("PROSPECTSCAN_CACHE_TTL_DAYS", "7"))
 # Columnas del contrato df_resultados
 DF_COLUMNS = [
     "dominio",
+    "score",
     "postura_identidad",
     "postura_exposicion",
     "postura_general",
@@ -34,6 +35,7 @@ DF_COLUMNS = [
 CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS dominios_cache (
     dominio             TEXT PRIMARY KEY,
+    score               INTEGER DEFAULT 0,
     postura_identidad   TEXT,
     postura_exposicion  TEXT,
     postura_general     TEXT,
@@ -52,6 +54,7 @@ CREATE TABLE IF NOT EXISTS dominios_cache (
 
 CREATE INDEX IF NOT EXISTS idx_dominios_updated ON dominios_cache(updated_at);
 CREATE INDEX IF NOT EXISTS idx_dominios_postura ON dominios_cache(postura_general);
+CREATE INDEX IF NOT EXISTS idx_dominios_score ON dominios_cache(score);
 """
 
 
@@ -121,7 +124,7 @@ def get_cached_dominios(dominios: List[str]) -> Tuple[pd.DataFrame, List[str]]:
         placeholders = ",".join(["%s"] * len(dominios))
 
         query = f"""
-            SELECT dominio, postura_identidad, postura_exposicion, postura_general,
+            SELECT dominio, score, postura_identidad, postura_exposicion, postura_general,
                    correo_proveedor, correo_gateway, correo_envio, spf_estado,
                    dmarc_estado, https_estado, cdn_waf, hsts, csp, dominio_antiguedad
             FROM dominios_cache
@@ -158,14 +161,16 @@ def save_to_cache(df: pd.DataFrame):
     try:
         with conn.cursor() as cur:
             for _, row in df.iterrows():
+                score_val = int(row.get("score", 0)) if "score" in row else 0
                 cur.execute("""
                     INSERT INTO dominios_cache (
-                        dominio, postura_identidad, postura_exposicion, postura_general,
+                        dominio, score, postura_identidad, postura_exposicion, postura_general,
                         correo_proveedor, correo_gateway, correo_envio, spf_estado,
                         dmarc_estado, https_estado, cdn_waf, hsts, csp, dominio_antiguedad,
                         updated_at
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (dominio) DO UPDATE SET
+                        score = EXCLUDED.score,
                         postura_identidad = EXCLUDED.postura_identidad,
                         postura_exposicion = EXCLUDED.postura_exposicion,
                         postura_general = EXCLUDED.postura_general,
@@ -182,6 +187,7 @@ def save_to_cache(df: pd.DataFrame):
                         updated_at = NOW()
                 """, (
                     row["dominio"],
+                    score_val,
                     row["postura_identidad"],
                     row["postura_exposicion"],
                     row["postura_general"],
@@ -220,7 +226,7 @@ def query_all_cached(filtros: Optional[dict] = None) -> pd.DataFrame:
 
     try:
         query = """
-            SELECT dominio, postura_identidad, postura_exposicion, postura_general,
+            SELECT dominio, score, postura_identidad, postura_exposicion, postura_general,
                    correo_proveedor, correo_gateway, correo_envio, spf_estado,
                    dmarc_estado, https_estado, cdn_waf, hsts, csp, dominio_antiguedad
             FROM dominios_cache
@@ -292,7 +298,7 @@ def get_single_domain(dominio: str) -> Optional[pd.Series]:
         cutoff = datetime.now() - timedelta(days=CACHE_TTL_DAYS)
 
         query = """
-            SELECT dominio, postura_identidad, postura_exposicion, postura_general,
+            SELECT dominio, score, postura_identidad, postura_exposicion, postura_general,
                    correo_proveedor, correo_gateway, correo_envio, spf_estado,
                    dmarc_estado, https_estado, cdn_waf, hsts, csp, dominio_antiguedad
             FROM dominios_cache
