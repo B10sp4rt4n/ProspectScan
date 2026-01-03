@@ -969,13 +969,21 @@ def aplicar_busqueda(df: pd.DataFrame, texto: str) -> pd.DataFrame:
 
 
 def aplicar_filtros(df: pd.DataFrame) -> pd.DataFrame:
-    if st.checkbox("Solo postura básica"):
+    """Aplica filtros solo si el usuario los activa en el expander."""
+    with st.expander("🔧 Filtros (opcional)", expanded=False):
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            filtro_basica = st.checkbox("Solo postura básica")
+        with col2:
+            filtro_dmarc = st.checkbox("Sin DMARC activo")
+        with col3:
+            filtro_asimetria = st.checkbox("Asimetría correo / web")
+
+    if filtro_basica:
         df = df[df.postura_general == "Básica"]
-
-    if st.checkbox("Sin DMARC activo"):
+    if filtro_dmarc:
         df = df[df.dmarc_estado != "Reject"]
-
-    if st.checkbox("Asimetría correo / web"):
+    if filtro_asimetria:
         df = df[df.postura_identidad != df.postura_exposicion]
 
     return df
@@ -984,9 +992,17 @@ def aplicar_filtros(df: pd.DataFrame) -> pd.DataFrame:
 def vista_lista_explorable(df: pd.DataFrame):
     st.subheader("🔎 Exploración de Dominios")
 
+    # Primero mostrar cuántos hay en total
+    st.caption(f"Total: {len(df)} dominios")
+
+    # Búsqueda y filtros
     busqueda = st.text_input("Búsqueda inteligente")
     df_filtrado = aplicar_busqueda(df, busqueda)
     df_filtrado = aplicar_filtros(df_filtrado)
+
+    # Indicar si hay filtros activos
+    if len(df_filtrado) < len(df):
+        st.info(f"Mostrando {len(df_filtrado)} de {len(df)} dominios (filtros activos)")
 
     st.dataframe(
         df_filtrado[["dominio", "postura_general", "correo_proveedor", "cdn_waf"]],
