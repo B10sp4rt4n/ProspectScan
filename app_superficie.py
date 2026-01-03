@@ -1069,17 +1069,43 @@ def main():
             elif not es_corporativo(dominio_limpio):
                 st.warning("Ese es un dominio personal (Gmail, Hotmail, etc.)")
             else:
-                # Primero buscar en cache
-                row_cached = None
-                if CACHE_AVAILABLE:
-                    row_cached = get_single_domain(dominio_limpio)
-
-                if row_cached is not None:
-                    st.success(f"✅ Resultado desde cache (sin re-análisis)")
-                    df_single = pd.DataFrame([row_cached])
+                # Evitar re-análisis en cada rerun: si el dominio no cambió, reutiliza.
+                if (
+                    st.session_state.get("single_domain_last") == dominio_limpio
+                    and isinstance(st.session_state.get("single_domain_df"), pd.DataFrame)
+                    and not st.session_state["single_domain_df"].empty
+                ):
+                    df_single = st.session_state["single_domain_df"]
                 else:
-                    with st.spinner(f"Analizando {dominio_limpio}..."):
-                        df_single = analizar_dominios([dominio_limpio])
+                    df_single = pd.DataFrame()
+
+                    # 0) Cache local (si ya venía en el dataframe actual de sesión)
+                    df_local = st.session_state.get("df_resultados_last")
+                    if isinstance(df_local, pd.DataFrame) and not df_local.empty:
+                        hit = df_local[df_local["dominio"] == dominio_limpio]
+                        if not hit.empty:
+                            st.success("✅ Resultado desde cache local (sin re-análisis)")
+                            df_single = hit.reset_index(drop=True)
+
+                    # 1) Cache Neon (si está configurado)
+                    if df_single.empty:
+                        row_cached = None
+                        if CACHE_AVAILABLE:
+                            row_cached = get_single_domain(dominio_limpio)
+
+                        if row_cached is not None:
+                            st.success("✅ Resultado desde cache Neon (sin re-análisis)")
+                            df_single = pd.DataFrame([row_cached])
+
+                    # 2) Re-análisis solo si no hay cache
+                    if df_single.empty:
+                        with st.spinner(f"Analizando {dominio_limpio}..."):
+                            df_single = analizar_dominios([dominio_limpio])
+
+                    # Persistir en sesión para evitar reruns costosos
+                    if isinstance(df_single, pd.DataFrame) and not df_single.empty:
+                        st.session_state["single_domain_last"] = dominio_limpio
+                        st.session_state["single_domain_df"] = df_single
 
                 if not df_single.empty:
                     row = df_single.iloc[0]
