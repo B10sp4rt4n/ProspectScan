@@ -884,16 +884,27 @@ def analizar_dominios(dominios: List[str]) -> pd.DataFrame:
         if CACHE_AVAILABLE and not df_cached.empty:
             st.info(f"🔍 Analizando {len(pendientes)} dominios nuevos...")
 
+        progreso = st.progress(0)
+        estado = st.empty()
+        total_pendientes = len(pendientes)
+        completados = 0
+
         resultados: List[ResultadoSuperficie] = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
             futuros = {executor.submit(analizar_dominio, d): d for d in pendientes}
             for futuro in concurrent.futures.as_completed(futuros):
+                completados += 1
+                dom = futuros[futuro]
+                estado.text(f"Analizando: {dom} ({completados}/{total_pendientes})")
+                progreso.progress(min(completados / max(total_pendientes, 1), 1.0))
                 try:
                     resultados.append(futuro.result())
                 except Exception as e:
-                    dom = futuros[futuro]
                     st.warning(f"Fallo analizando {dom}: {e}")
                     continue
+
+        estado.text("✅ Diagnóstico completado")
+        progreso.progress(1.0)
 
         if resultados:
             df_nuevos = pd.DataFrame([resultado_a_df_resultados(r) for r in resultados])
