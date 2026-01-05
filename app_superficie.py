@@ -87,9 +87,21 @@ class EstadoHeader(Enum):
 
 VENDORS_CORREO_MX = {
     r'outlook|protection\.outlook|microsoft': "Microsoft 365",
-    r'google|googlemail|smtp\.google': "Google Workspace",
+    r'google|googlemail|smtp\.google|aspmx': "Google Workspace",
     r'zoho': "Zoho Mail",
     r'secureserver|domaincontrol': "GoDaddy",
+    r'hornetsecurity': "Hornetsecurity",
+    r'mimecast': "Mimecast",
+    r'proofpoint|pphosted': "Proofpoint",
+    r'barracuda': "Barracuda",
+    r'mailgun': "Mailgun",
+    r'sendgrid': "SendGrid",
+    r'amazonses|amazon.*mail': "Amazon SES",
+    r'office365': "Microsoft 365",
+    r'exchange': "Microsoft Exchange",
+    r'1and1|ionos': "IONOS",
+    r'ovh': "OVH Mail",
+    r'rackspace': "Rackspace Email",
 }
 
 VENDORS_SEGURIDAD_MX = {

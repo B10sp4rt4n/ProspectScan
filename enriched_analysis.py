@@ -133,12 +133,12 @@ def detect_industry(domain: str, mx_records: List[str], spf: str) -> str:
 # ============================================================================
 
 def detect_tech_stack(resultado: ResultadoSuperficie) -> List[str]:
-    """Detecta el stack tecnológico completo"""
+    """Detecta el stack tecnológico completo incluyendo proveedor web"""
     stack = []
     
     # Email providers
     if resultado.identidad.vendor_correo:
-        stack.append(f"Email: {resultado.identidad.vendor_correo}")
+        stack.append(f"Email Provider: {resultado.identidad.vendor_correo}")
     
     # Security gateways
     for vendor in resultado.identidad.vendors_seguridad:
@@ -151,21 +151,92 @@ def detect_tech_stack(resultado: ResultadoSuperficie) -> List[str]:
     # CDN/WAF
     if resultado.exposicion.cdn_waf:
         stack.append(f"CDN/WAF: {resultado.exposicion.cdn_waf}")
+    else:
+        stack.append("CDN/WAF: Sin protección")
     
     # Web server
     if resultado.exposicion.servidor:
-        stack.append(f"Server: {resultado.exposicion.servidor}")
+        stack.append(f"Web Server: {resultado.exposicion.servidor}")
+    else:
+        stack.append("Web Server: No detectado")
     
-    # Detectar cloud provider por MX o servidor
+    # Detectar cloud/hosting provider
     mx_records = obtener_mx(resultado.dominio)
     mx_text = " ".join(mx_records).lower()
+    servidor_text = resultado.exposicion.servidor.lower() if resultado.exposicion.servidor else ""
     
-    if "amazonaws" in mx_text or "aws" in resultado.exposicion.servidor.lower() if resultado.exposicion.servidor else False:
-        stack.append("Cloud: AWS")
-    elif "google" in mx_text:
-        stack.append("Cloud: Google Cloud")
-    elif "azure" in mx_text or "microsoft" in mx_text:
-        stack.append("Cloud: Azure")
+    cloud_detected = False
+    
+    # AWS
+    if "amazonaws" in mx_text or "aws" in servidor_text or "amazon" in servidor_text:
+        stack.append("Hosting: AWS (Amazon Web Services)")
+        cloud_detected = True
+    
+    # Google Cloud
+    elif "google" in mx_text or "gcp" in servidor_text or "googleusercontent" in servidor_text:
+        stack.append("Hosting: Google Cloud Platform")
+        cloud_detected = True
+    
+    # Azure
+    elif "azure" in mx_text or "azure" in servidor_text or "microsoft" in mx_text:
+        stack.append("Hosting: Microsoft Azure")
+        cloud_detected = True
+    
+    # Cloudflare (hosting + CDN)
+    elif "cloudflare" in servidor_text:
+        stack.append("Hosting: Cloudflare")
+        cloud_detected = True
+    
+    # DigitalOcean
+    elif "digitalocean" in servidor_text:
+        stack.append("Hosting: DigitalOcean")
+        cloud_detected = True
+    
+    # Otros detectables por servidor
+    elif "nginx" in servidor_text:
+        stack.append("Hosting: Servidor propio/VPS (Nginx)")
+        cloud_detected = True
+    elif "apache" in servidor_text:
+        stack.append("Hosting: Servidor propio/VPS (Apache)")
+        cloud_detected = True
+    
+    if not cloud_detected:
+        stack.append("Hosting: No identificado")
+    
+    # Detectar DNS provider (obtener nameservers)
+    try:
+        import dns.resolver
+        ns_records = dns.resolver.resolve(resultado.dominio, 'NS', lifetime=5)
+        ns_list = [r.to_text().lower() for r in ns_records]
+        ns_text = " ".join(ns_list)
+        
+        # Detectar proveedor DNS
+        if "cloudflare" in ns_text:
+            stack.append("DNS: Cloudflare")
+        elif "awsdns" in ns_text or "route53" in ns_text:
+            stack.append("DNS: AWS Route53")
+        elif "google" in ns_text:
+            stack.append("DNS: Google Cloud DNS")
+        elif "azure" in ns_text:
+            stack.append("DNS: Azure DNS")
+        elif "godaddy" in ns_text:
+            stack.append("DNS: GoDaddy")
+        elif "namecheap" in ns_text:
+            stack.append("DNS: Namecheap")
+        elif ns_list:
+            # Tomar el primer nameserver como referencia
+            dns_provider = ns_list[0].split('.')[0] if ns_list else "Desconocido"
+            stack.append(f"DNS: {dns_provider.title()}")
+    except:
+        stack.append("DNS: No detectado")
+    
+    # HTTPS/SSL status
+    if resultado.exposicion.https.value == "Forzado":
+        stack.append("SSL: ✅ Configurado (HTTPS forzado)")
+    elif resultado.exposicion.https.value == "Disponible":
+        stack.append("SSL: ⚠️ Disponible (no forzado)")
+    else:
+        stack.append("SSL: ❌ No configurado")
     
     return stack
 

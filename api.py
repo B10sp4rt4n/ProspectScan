@@ -29,7 +29,7 @@ from app_superficie import (
 from enriched_analysis import generate_enriched_analysis
 
 if CACHE_AVAILABLE:
-    from db_cache import query_all_cached, get_cache_stats
+    from db_cache import query_all_cached, get_cache_stats, _get_connection
 
 # ============================================================================
 # CONFIGURACIÓN FASTAPI
@@ -251,20 +251,20 @@ def get_all_domains():
                 "score": calcular_score(
                     row.get("postura_identidad", "Básica"),
                     row.get("postura_exposicion", "Básica"),
-                    row.get("estado_spf", "Ausente"),
-                    row.get("estado_dmarc", "Ausente")
+                    row.get("spf_estado", "Ausente"),
+                    row.get("dmarc_estado", "Ausente")
                 ),
                 "identity_level": row.get("postura_identidad", "Básica"),
                 "exposure_level": row.get("postura_exposicion", "Básica"),
                 "general_level": row.get("postura_general", "Básica"),
-                "provider": row.get("vendor_correo", "Otro") or "Otro",
-                "spf_status": row.get("estado_spf", "Ausente"),
-                "dmarc_status": row.get("estado_dmarc", "Ausente"),
-                "https_status": row.get("https", "No disponible"),
+                "provider": row.get("correo_proveedor", "Otro") or "Otro",
+                "spf_status": row.get("spf_estado", "Ausente"),
+                "dmarc_status": row.get("dmarc_estado", "Ausente"),
+                "https_status": row.get("https_estado", "No disponible"),
                 "cdn_waf": row.get("cdn_waf"),
-                "security_vendors": row.get("vendors_seguridad", "").split(", ") if row.get("vendors_seguridad") else [],
+                "security_vendors": row.get("correo_gateway", "").split(", ") if row.get("correo_gateway") else [],
                 "recommendations": [],  # No guardadas en cache
-                "analyzed_at": row.get("timestamp", datetime.utcnow().isoformat())
+                "analyzed_at": row.get("updated_at", datetime.utcnow().isoformat())
             }
             dominios.append(dominio_data)
         
@@ -467,6 +467,42 @@ def analyze_domain_enriched(request: DomainAnalysisRequest):
     
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al generar análisis enriquecido: {str(e)}")
+
+
+@app.delete("/api/cache/clear")
+def clear_cache():
+    """
+    Limpia completamente el caché de dominios.
+    Útil para forzar re-análisis con detección actualizada.
+    """
+    if not CACHE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Cache no disponible")
+    
+    try:
+        conn = _get_connection()
+        if not conn:
+            raise HTTPException(status_code=500, detail="No se pudo conectar a la base de datos")
+        
+        cur = conn.cursor()
+        cur.execute("TRUNCATE TABLE dominios_cache;")
+        conn.commit()
+        
+        # Obtener conteo antes de cerrar
+        cur.execute("SELECT COUNT(*) FROM dominios_cache;")
+        count = cur.fetchone()[0]
+        
+        cur.close()
+        conn.close()
+        
+        return {
+            "status": "success",
+            "message": "Caché limpiado completamente",
+            "domains_remaining": count,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al limpiar caché: {str(e)}")
 
 
 # ============================================================================
