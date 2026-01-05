@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { API_URL } from '../config';
 import './ZoomInfoUpload.css';
 
 /**
@@ -35,8 +36,9 @@ const ZoomInfoUpload = ({ onUploadSuccess }) => {
       const formData = new FormData();
       formData.append('file', file);
 
-      console.log('Sending POST to /api/ingesta/upload');
-      const response = await fetch('/api/ingesta/upload', {
+      const apiUrl = API_URL('/api/ingesta/upload');
+      console.log('Sending POST to', apiUrl);
+      const response = await fetch(apiUrl, {
         method: 'POST',
         body: formData,
       });

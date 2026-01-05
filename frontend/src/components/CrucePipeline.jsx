@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { API_URL } from '../config';
 import './CrucePipeline.css';
 
 /**
@@ -21,8 +22,10 @@ const CrucePipeline = ({ snapshotId }) => {
     setError(null);
 
     try {
+      const apiUrl = API_URL(`/api/cruce/batch?snapshot_id=${snapshotId}&prioridad_minima=${prioridadFilter}`);
+      console.log('Sending POST to', apiUrl);
       const response = await fetch(
-        `/api/cruce/batch?snapshot_id=${snapshotId}&prioridad_minima=${prioridadFilter}`,
+        apiUrl,
         {
           method: 'POST',
           headers: {
