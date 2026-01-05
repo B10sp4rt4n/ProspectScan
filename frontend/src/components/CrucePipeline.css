@@ -1,0 +1,374 @@
+.cruce-pipeline {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.pipeline-header {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.pipeline-header h2 {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+  color: #2c3e50;
+}
+
+.pipeline-header p {
+  color: #7f8c8d;
+  font-size: 1.1rem;
+}
+
+/* Controls */
+.pipeline-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 2rem;
+}
+
+.control-group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.control-group label {
+  font-weight: 500;
+  color: #34495e;
+}
+
+.control-group select {
+  padding: 0.75rem 1rem;
+  border: 2px solid #ecf0f1;
+  border-radius: 8px;
+  font-size: 1rem;
+  background: white;
+  cursor: pointer;
+  transition: border-color 0.3s;
+}
+
+.control-group select:hover {
+  border-color: #3498db;
+}
+
+.control-group select:focus {
+  outline: none;
+  border-color: #2980b9;
+}
+
+.btn-execute {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 2rem;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.btn-execute:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.btn-execute:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+/* Error */
+.pipeline-error {
+  margin-bottom: 2rem;
+  padding: 1rem;
+  background: #fadbd8;
+  border: 1px solid #e74c3c;
+  border-radius: 8px;
+  color: #c0392b;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Results Summary */
+.results-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.summary-card {
+  background: white;
+  padding: 1.5rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  text-align: center;
+  border-left: 4px solid #3498db;
+}
+
+.summary-card.error {
+  border-left-color: #e74c3c;
+}
+
+.card-value {
+  font-size: 2.5rem;
+  font-weight: bold;
+  color: #2c3e50;
+  margin-bottom: 0.5rem;
+}
+
+.card-label {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* Results List */
+.results-list {
+  background: white;
+  padding: 2rem;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.results-list h3 {
+  color: #2c3e50;
+  margin-bottom: 1.5rem;
+  font-size: 1.5rem;
+}
+
+.no-results {
+  text-align: center;
+  padding: 3rem;
+  color: #7f8c8d;
+}
+
+.no-results p {
+  font-size: 1.2rem;
+  margin-bottom: 0.5rem;
+}
+
+.no-results small {
+  font-size: 0.9rem;
+}
+
+/* Resultado Card */
+.resultado-card {
+  background: #f8f9fa;
+  border-radius: 12px;
+  margin-bottom: 1.5rem;
+  overflow: hidden;
+  border: 1px solid #ecf0f1;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.resultado-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.resultado-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.5rem;
+  background: white;
+  border-bottom: 2px solid #ecf0f1;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.resultado-rank {
+  font-size: 1.5rem;
+  font-weight: bold;
+  color: #95a5a6;
+}
+
+.resultado-emoji {
+  font-size: 2rem;
+}
+
+.resultado-dominio {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.3rem;
+}
+
+.header-right {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.prioridad-badge {
+  padding: 0.5rem 1rem;
+  color: white;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+}
+
+.score-badge {
+  background: #ecf0f1;
+  color: #2c3e50;
+  padding: 0.5rem 1rem;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+/* Resultado Body */
+.resultado-body {
+  padding: 1.5rem;
+}
+
+.info-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.info-label {
+  font-size: 0.9rem;
+  color: #7f8c8d;
+  font-weight: 500;
+}
+
+.info-value {
+  font-size: 1rem;
+  color: #2c3e50;
+  font-weight: 600;
+}
+
+.info-value.oportuno {
+  color: #27ae60;
+}
+
+.info-value.no-oportuno {
+  color: #e67e22;
+}
+
+.momento-razon {
+  padding: 1rem;
+  background: #fff3cd;
+  border-left: 4px solid #f39c12;
+  border-radius: 6px;
+  margin-bottom: 1.5rem;
+  color: #856404;
+}
+
+/* Factores */
+.factores {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  border-radius: 8px;
+}
+
+.factores.positivos {
+  background: #d5f4e6;
+  border-left: 4px solid #2ecc71;
+}
+
+.factores.negativos {
+  background: #fadbd8;
+  border-left: 4px solid #e74c3c;
+}
+
+.factores h5 {
+  margin: 0 0 0.5rem 0;
+  color: #2c3e50;
+}
+
+.factores ul {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.factores li {
+  margin-bottom: 0.5rem;
+  color: #34495e;
+}
+
+/* Talking Points */
+.talking-points {
+  margin-bottom: 1.5rem;
+  padding: 1rem;
+  background: #e8f4f8;
+  border-left: 4px solid #3498db;
+  border-radius: 8px;
+}
+
+.talking-points h5 {
+  margin: 0 0 0.75rem 0;
+  color: #2c3e50;
+}
+
+.talking-points ol {
+  margin: 0;
+  padding-left: 1.5rem;
+}
+
+.talking-points li {
+  margin-bottom: 0.75rem;
+  color: #34495e;
+  line-height: 1.6;
+}
+
+/* Regulaciones */
+.regulaciones {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.regulaciones strong {
+  color: #2c3e50;
+}
+
+.reg-badge {
+  background: #9b59b6;
+  color: white;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
