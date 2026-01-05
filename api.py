@@ -18,6 +18,10 @@ import pandas as pd
 from datetime import datetime
 import tempfile
 import os
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde .env
+load_dotenv()
 
 # Importar funciones del backend existente (Capa 3)
 from app_superficie import (
