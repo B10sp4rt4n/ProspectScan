@@ -1746,11 +1746,14 @@ def main():
                 with st.expander("👀 Vista previa de datos", expanded=False):
                     st.dataframe(df_zoom.head(10))
                 
-                # Intentar extraer dominios del Excel
+                # Intentar extraer dominios del Excel (case-insensitive)
                 dominios_col = None
-                for col in ['Website', 'website', 'Domain', 'domain', 'Company Website']:
-                    if col in df_zoom.columns:
-                        dominios_col = col
+                columnas_lower = {col.lower(): col for col in df_zoom.columns}
+                
+                for buscar in ['website', 'domain', 'company website', 'url', 'site']:
+                    if buscar in columnas_lower:
+                        dominios_col = columnas_lower[buscar]
+                        st.success(f"✅ Columna detectada: **{dominios_col}**")
                         break
                 
                 if dominios_col:
