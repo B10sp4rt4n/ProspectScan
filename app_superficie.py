@@ -1739,21 +1739,43 @@ def main():
         
         if zoominfo_file:
             try:
-                # Leer Excel
-                df_zoom = pd.read_excel(zoominfo_file)
-                st.success(f"✅ Archivo cargado: {len(df_zoom)} empresas")
+                # Leer Excel - primero sin headers para detectar estructura
+                df_raw = pd.read_excel(zoominfo_file, header=None)
+                
+                # Buscar fila que contiene "Website" o "Domain" (los headers reales)
+                header_row = None
+                for idx, row in df_raw.iterrows():
+                    row_values = [str(v).lower() for v in row.values if pd.notna(v)]
+                    if any('website' in v or 'domain' in v for v in row_values):
+                        header_row = idx
+                        break
+                
+                if header_row is not None:
+                    # Releer con la fila correcta como header
+                    zoominfo_file.seek(0)  # Reset file pointer
+                    df_zoom = pd.read_excel(zoominfo_file, header=header_row)
+                    st.success(f"✅ Headers detectados en fila {header_row + 1}. Total: {len(df_zoom)} empresas")
+                else:
+                    # Si no encontró, usar primera fila como header
+                    zoominfo_file.seek(0)
+                    df_zoom = pd.read_excel(zoominfo_file, header=0)
+                    st.info(f"📄 Usando primera fila como headers. Total: {len(df_zoom)} empresas")
+                
+                # Limpiar nombres de columnas
+                df_zoom.columns = [str(col).strip() for col in df_zoom.columns]
                 
                 with st.expander("👀 Vista previa de datos", expanded=False):
+                    st.write(f"**Columnas detectadas:** {list(df_zoom.columns)}")
                     st.dataframe(df_zoom.head(10))
                 
                 # Intentar extraer dominios del Excel (case-insensitive)
                 dominios_col = None
-                columnas_lower = {col.lower(): col for col in df_zoom.columns}
+                columnas_lower = {str(col).lower().strip(): col for col in df_zoom.columns}
                 
                 for buscar in ['website', 'domain', 'company website', 'url', 'site']:
                     if buscar in columnas_lower:
                         dominios_col = columnas_lower[buscar]
-                        st.success(f"✅ Columna detectada: **{dominios_col}**")
+                        st.success(f"✅ Columna de dominios: **{dominios_col}**")
                         break
                 
                 if dominios_col:
