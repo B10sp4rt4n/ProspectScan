@@ -22,16 +22,25 @@ const CrucePipeline = ({ snapshotId }) => {
 
     try {
       const response = await fetch(
-        `/api/cruce/batch?snapshot_id=${snapshotId}&prioridad_minima=${prioridadFilter}`
+        `/api/cruce/batch?snapshot_id=${snapshotId}&prioridad_minima=${prioridadFilter}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        }
       );
 
       if (!response.ok) {
-        throw new Error(`Error ${response.status}: ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`Error ${response.status}: ${errorText || response.statusText}`);
       }
 
       const data = await response.json();
+      console.log('Cruce ejecutado exitosamente:', data);
       setResults(data);
     } catch (err) {
+      console.error('Error ejecutando cruce:', err);
       setError(err.message);
     } finally {
       setIsProcessing(false);
