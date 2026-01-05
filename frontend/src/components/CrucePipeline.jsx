@@ -22,7 +22,7 @@ const CrucePipeline = ({ snapshotId }) => {
 
     try {
       const response = await fetch(
-        `http://localhost:8000/api/cruce/batch?snapshot_id=${snapshotId}&prioridad_minima=${prioridadFilter}`
+        `/api/cruce/batch?snapshot_id=${snapshotId}&prioridad_minima=${prioridadFilter}`
       );
 
       if (!response.ok) {

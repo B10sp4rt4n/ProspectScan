@@ -36,7 +36,7 @@ const ZoomInfoUpload = ({ onUploadSuccess }) => {
       formData.append('file', file);
 
       console.log('Sending POST to /api/ingesta/upload');
-      const response = await fetch('http://localhost:8000/api/ingesta/upload', {
+      const response = await fetch('/api/ingesta/upload', {
         method: 'POST',
         body: formData,
       });
@@ -80,7 +80,7 @@ const ZoomInfoUpload = ({ onUploadSuccess }) => {
         <h2>📤 Ingesta ZoomInfo</h2>
         <p>Sube un reporte Excel de ZoomInfo para iniciar el análisis</p>
         <div className="debug-info">
-          <small>🔧 Debug: API = http://localhost:8000 | Estado: {isUploading ? 'Subiendo...' : 'Listo'}</small>
+          <small>🔧 Debug: API = /api (proxy) | Estado: {isUploading ? 'Subiendo...' : 'Listo'}</small>
         </div>
       </div>
 
