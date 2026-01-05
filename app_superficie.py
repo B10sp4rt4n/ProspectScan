@@ -1845,27 +1845,51 @@ def main():
             st.markdown("---")
             st.markdown("#### 📊 Resultados del Análisis")
             
+            # Detectar nombre de columna de score (varía entre caché y análisis nuevo)
+            score_col = 'score' if 'score' in df_res.columns else 'score_final'
+            hsts_col = 'hsts' if 'hsts' in df_res.columns else 'hsts_presente'
+            provider_col = 'correo_proveedor' if 'correo_proveedor' in df_res.columns else 'email_provider'
+            
             # Métricas globales
             col1, col2, col3, col4 = st.columns(4)
             with col1:
                 st.metric("Dominios analizados", len(df_res))
             with col2:
-                score_promedio = df_res['score_final'].mean()
-                st.metric("Score Promedio", f"{score_promedio:.1f}/100")
+                if score_col in df_res.columns:
+                    score_promedio = df_res[score_col].mean()
+                    st.metric("Score Promedio", f"{score_promedio:.1f}/100")
+                else:
+                    st.metric("Score Promedio", "N/A")
             with col3:
-                con_dmarc = len(df_res[df_res['dmarc_estado'] != 'Ausente'])
-                st.metric("Con DMARC", f"{con_dmarc} ({con_dmarc/len(df_res)*100:.0f}%)")
+                if 'dmarc_estado' in df_res.columns:
+                    con_dmarc = len(df_res[df_res['dmarc_estado'] != 'Ausente'])
+                    st.metric("Con DMARC", f"{con_dmarc} ({con_dmarc/len(df_res)*100:.0f}%)")
+                else:
+                    st.metric("Con DMARC", "N/A")
             with col4:
-                con_hsts = len(df_res[df_res['hsts_presente']])
-                st.metric("Con HSTS", f"{con_hsts} ({con_hsts/len(df_res)*100:.0f}%)")
+                if hsts_col in df_res.columns:
+                    # Manejar tanto bool como string
+                    hsts_values = df_res[hsts_col]
+                    if hsts_values.dtype == bool:
+                        con_hsts = hsts_values.sum()
+                    else:
+                        con_hsts = len(df_res[df_res[hsts_col].isin([True, 'True', 'Sí', 'Yes', 1, '1'])])
+                    st.metric("Con HSTS", f"{con_hsts} ({con_hsts/len(df_res)*100:.0f}%)")
+                else:
+                    st.metric("Con HSTS", "N/A")
             
             # Vista global
             vista_global(df_res)
             
-            # Tabla detallada
+            # Tabla detallada - seleccionar columnas disponibles
+            cols_mostrar = ['dominio']
+            for col in [score_col, provider_col, 'dmarc_estado', hsts_col, 'cdn_waf']:
+                if col in df_res.columns:
+                    cols_mostrar.append(col)
+            
             st.markdown("### 🗂️ Detalle por Dominio")
             st.dataframe(
-                df_res[['dominio', 'score_final', 'email_provider', 'dmarc_estado', 'hsts_presente', 'cdn_waf']],
+                df_res[cols_mostrar],
                 use_container_width=True,
                 height=400
             )
