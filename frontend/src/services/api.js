@@ -129,3 +129,28 @@ export async function checkHealth() {
     throw error;
   }
 }
+
+/**
+ * Analiza un dominio y retorna análisis enriquecido con insights comerciales
+ */
+export async function analyzeEnriched(domain) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/analyze/enriched`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ domain }),
+    });
+    
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    return data;
+  } catch (error) {
+    console.error('Error analyzing enriched:', error);
+    throw error;
+  }
+}

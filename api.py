@@ -25,6 +25,9 @@ from app_superficie import (
     CACHE_AVAILABLE
 )
 
+# Importar análisis enriquecido
+from enriched_analysis import generate_enriched_analysis
+
 if CACHE_AVAILABLE:
     from db_cache import query_all_cached, get_cache_stats
 
@@ -398,6 +401,72 @@ def get_statistics():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener estadísticas: {str(e)}")
+
+
+@app.post("/api/analyze/enriched")
+def analyze_domain_enriched(request: DomainAnalysisRequest):
+    """
+    Analiza un dominio y retorna análisis enriquecido con insights comerciales.
+    Incluye:
+    - Detección de industria
+    - Tech stack completo
+    - Budget signals
+    - Talking points para ventas
+    - Estimación de deal size
+    - Urgencia de acción
+    """
+    try:
+        # Análisis técnico base
+        resultado = analizar_dominio(request.domain)
+        
+        # Calcular score
+        score = calcular_score(
+            resultado.identidad.postura.value,
+            resultado.exposicion.postura.value,
+            resultado.identidad.estado_spf.value,
+            resultado.identidad.estado_dmarc.value
+        )
+        
+        # Generar análisis enriquecido
+        enriched = generate_enriched_analysis(resultado, score)
+        
+        # Convertir a dict para JSON response
+        return {
+            "domain": enriched.domain,
+            "industry": enriched.industry,
+            "score": enriched.score,
+            "posture": enriched.posture,
+            "insights": [
+                {
+                    "category": i.category,
+                    "title": i.title,
+                    "status": i.status,
+                    "technical_detail": i.technical_detail,
+                    "business_impact": i.business_impact,
+                    "cost_estimate": i.cost_estimate,
+                    "recommendation": i.recommendation,
+                    "urgency": i.urgency
+                }
+                for i in enriched.insights
+            ],
+            "commercial_intel": {
+                "budget_signals": enriched.commercial_intel.budget_signals,
+                "tech_stack": enriched.commercial_intel.tech_stack,
+                "decision_makers": enriched.commercial_intel.decision_makers,
+                "pain_points": enriched.commercial_intel.pain_points,
+                "estimated_budget": enriched.commercial_intel.estimated_budget,
+                "competitive_advantage": enriched.commercial_intel.competitive_advantage
+            },
+            "executive_summary": enriched.executive_summary,
+            "technical_summary": enriched.technical_summary,
+            "sales_talking_points": enriched.sales_talking_points,
+            "estimated_deal_size": enriched.estimated_deal_size,
+            "urgency_level": enriched.urgency_level,
+            "analyzed_at": enriched.analyzed_at
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al generar análisis enriquecido: {str(e)}")
 
 
 # ============================================================================

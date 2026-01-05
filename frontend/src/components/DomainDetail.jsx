@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { getScoreColor, getSecurityColor, generateDomainInsights } from '../utils/domainLogic';
+import { analyzeEnriched } from '../services/api';
+import EnrichedAnalysis from './EnrichedAnalysis';
 
 /**
  * Detalle contextual de un dominio seleccionado
@@ -7,9 +9,25 @@ import { getScoreColor, getSecurityColor, generateDomainInsights } from '../util
  * Mantiene el contexto global mientras explora el detalle
  */
 const DomainDetail = ({ domain, onClose, className = '' }) => {
+  const [enrichedAnalysis, setEnrichedAnalysis] = useState(null);
+  const [loadingEnriched, setLoadingEnriched] = useState(false);
+
   if (!domain) {
     return null;
   }
+
+  const handleEnrichedAnalysis = async () => {
+    try {
+      setLoadingEnriched(true);
+      const analysis = await analyzeEnriched(domain.domain);
+      setEnrichedAnalysis(analysis);
+    } catch (error) {
+      console.error('Error loading enriched analysis:', error);
+      alert('No se pudo cargar el análisis enriquecido. Por favor intenta de nuevo.');
+    } finally {
+      setLoadingEnriched(false);
+    }
+  };
 
   const scoreColor = getScoreColor(domain.score);
   const identityColor = getSecurityColor(domain.identity_level);
@@ -20,7 +38,8 @@ const DomainDetail = ({ domain, onClose, className = '' }) => {
   const insights = generateDomainInsights(domain);
 
   return (
-    <div className={`domain-detail ${className}`}>
+    <>
+      <div className={`domain-detail ${className}`}>
       <div className="detail-header">
         <div className="detail-title">
           <h3>{domain.domain}</h3>
@@ -142,6 +161,13 @@ const DomainDetail = ({ domain, onClose, className = '' }) => {
         <div className="detail-section actions-section">
           <h4>Acciones Sugeridas</h4>
           <div className="actions-list">
+            <button 
+              className="action-btn priority" 
+              onClick={handleEnrichedAnalysis}
+              disabled={loadingEnriched}
+            >
+              {loadingEnriched ? '⏳ Cargando...' : '📊 Análisis Enriquecido Completo'}
+            </button>
             {domain.score < 70 && (
               <button className="action-btn priority">
                 Generar ticket de prospección
@@ -157,6 +183,15 @@ const DomainDetail = ({ domain, onClose, className = '' }) => {
         </div>
       </div>
     </div>
+
+    {/* Modal de análisis enriquecido */}
+    {enrichedAnalysis && (
+      <EnrichedAnalysis 
+        analysis={enrichedAnalysis} 
+        onClose={() => setEnrichedAnalysis(null)} 
+      />
+    )}
+  </>
   );
 };
 
