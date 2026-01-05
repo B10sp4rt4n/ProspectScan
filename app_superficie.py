@@ -1831,7 +1831,10 @@ def main():
                                     resultados_df = pd.DataFrame([resultado_a_df_resultados(r) for r in resultados])
                             
                             if resultados_df is not None and not resultados_df.empty:
+                                # Enriquecer con datos de contexto empresarial del Excel
+                                resultados_df = enriquecer_con_contexto(resultados_df, df_zoom, dominios_col)
                                 st.session_state["pipeline_results"] = resultados_df
+                                st.session_state["df_zoom_original"] = df_zoom
                                 st.success(f"✅ Análisis completado: {len(resultados_df)} dominios")
                             else:
                                 st.error("No se pudieron analizar los dominios")
@@ -1848,12 +1851,10 @@ def main():
         if "pipeline_results" in st.session_state:
             df_res = st.session_state["pipeline_results"]
             st.markdown("---")
-            st.markdown("#### 📊 Resultados del Análisis")
+            st.markdown("### 📊 Resultados del Análisis de Postura")
             
-            # Detectar nombre de columna de score (varía entre caché y análisis nuevo)
+            # Detectar nombre de columna de score
             score_col = 'score' if 'score' in df_res.columns else 'score_final'
-            hsts_col = 'hsts' if 'hsts' in df_res.columns else 'hsts_presente'
-            provider_col = 'correo_proveedor' if 'correo_proveedor' in df_res.columns else 'email_provider'
             
             # Métricas globales
             col1, col2, col3, col4 = st.columns(4)
@@ -1862,51 +1863,260 @@ def main():
             with col2:
                 if score_col in df_res.columns:
                     score_promedio = df_res[score_col].mean()
-                    st.metric("Score Promedio", f"{score_promedio:.1f}/100")
-                else:
-                    st.metric("Score Promedio", "N/A")
+                    st.metric("Score Seguridad", f"{score_promedio:.1f}/100")
             with col3:
                 if 'dmarc_estado' in df_res.columns:
                     con_dmarc = len(df_res[df_res['dmarc_estado'] != 'Ausente'])
-                    st.metric("Con DMARC", f"{con_dmarc} ({con_dmarc/len(df_res)*100:.0f}%)")
-                else:
-                    st.metric("Con DMARC", "N/A")
+                    st.metric("Con DMARC", f"{con_dmarc}/{len(df_res)}")
             with col4:
-                if hsts_col in df_res.columns:
-                    # Manejar tanto bool como string
-                    hsts_values = df_res[hsts_col]
-                    if hsts_values.dtype == bool:
-                        con_hsts = hsts_values.sum()
-                    else:
-                        con_hsts = len(df_res[df_res[hsts_col].isin([True, 'True', 'Sí', 'Yes', 1, '1'])])
-                    st.metric("Con HSTS", f"{con_hsts} ({con_hsts/len(df_res)*100:.0f}%)")
-                else:
-                    st.metric("Con HSTS", "N/A")
+                if 'postura_general' in df_res.columns:
+                    basica = len(df_res[df_res['postura_general'] == 'Básica'])
+                    st.metric("Postura Básica", f"{basica} ({basica/len(df_res)*100:.0f}%)")
             
-            # Vista global
-            vista_global(df_res)
+            # ============================================================
+            # CRUCE SEMÁNTICO - Priorización de Oportunidades
+            # ============================================================
+            st.markdown("---")
+            st.markdown("### 🎯 Cruce Semántico: Priorización de Oportunidades")
+            st.markdown("*Contexto × Postura → Prioridad de Acción*")
             
-            # Tabla detallada - seleccionar columnas disponibles
-            cols_mostrar = ['dominio']
-            for col in [score_col, provider_col, 'dmarc_estado', hsts_col, 'cdn_waf']:
-                if col in df_res.columns:
-                    cols_mostrar.append(col)
+            # Filtro de prioridad
+            col_filtro, col_info = st.columns([1, 3])
+            with col_filtro:
+                filtro_prioridad = st.selectbox(
+                    "Mostrar prioridad ≥",
+                    ["🔴 Crítica", "🟠 Alta", "🟡 Media", "🟢 Baja"],
+                    index=2
+                )
             
-            st.markdown("### 🗂️ Detalle por Dominio")
-            st.dataframe(
-                df_res[cols_mostrar],
-                use_container_width=True,
-                height=400
-            )
+            # Calcular prioridades si no existen
+            if 'prioridad' not in df_res.columns:
+                df_res = calcular_prioridades_cruce(df_res)
+                st.session_state["pipeline_results"] = df_res
             
-            # Exportar
+            # Filtrar según selección
+            prioridad_map = {"🔴 Crítica": 4, "🟠 Alta": 3, "🟡 Media": 2, "🟢 Baja": 1}
+            min_prioridad = prioridad_map.get(filtro_prioridad, 2)
+            df_filtrado = df_res[df_res['prioridad_num'] >= min_prioridad].sort_values('score_oportunidad', ascending=False)
+            
+            with col_info:
+                st.info(f"📋 Mostrando **{len(df_filtrado)}** de {len(df_res)} dominios")
+            
+            # Mostrar tarjetas de oportunidad
+            for idx, row in df_filtrado.iterrows():
+                mostrar_tarjeta_oportunidad(row, score_col)
+            
+            # Exportar con prioridades
+            st.markdown("---")
             csv = df_res.to_csv(index=False)
             st.download_button(
-                "📥 Exportar resultados (CSV)",
+                "📥 Exportar análisis completo (CSV)",
                 csv,
-                f"pipeline_cruce_{datetime.now().strftime('%Y%m%d')}.csv",
+                f"prospectscan_cruce_{datetime.now().strftime('%Y%m%d')}.csv",
                 "text/csv"
             )
+
+
+def enriquecer_con_contexto(df_postura: pd.DataFrame, df_zoom: pd.DataFrame, dominios_col: str) -> pd.DataFrame:
+    """Enriquece resultados de postura con contexto empresarial del Excel ZoomInfo."""
+    # Buscar columnas de contexto en el Excel
+    columnas_lower = {str(col).lower().strip(): col for col in df_zoom.columns}
+    
+    # Mapeo de columnas ZoomInfo a contexto
+    mapeo = {
+        'industria': ['industry', 'industria', 'sector'],
+        'empleados': ['employees', 'employee count', 'empleados', 'num employees'],
+        'revenue': ['revenue', 'annual revenue', 'ingresos'],
+        'empresa': ['company name', 'company', 'empresa', 'nombre'],
+        'pais': ['country', 'pais', 'país', 'headquarters country'],
+    }
+    
+    for campo, opciones in mapeo.items():
+        for opcion in opciones:
+            if opcion in columnas_lower:
+                col_real = columnas_lower[opcion]
+                # Crear lookup por dominio
+                df_zoom['_dominio_temp'] = df_zoom[dominios_col].apply(lambda x: extraer_dominio(str(x)) if pd.notna(x) else None)
+                lookup = df_zoom.set_index('_dominio_temp')[col_real].to_dict()
+                df_postura[campo] = df_postura['dominio'].map(lookup)
+                break
+    
+    return df_postura
+
+
+def calcular_prioridades_cruce(df: pd.DataFrame) -> pd.DataFrame:
+    """Calcula prioridad de acción y score de oportunidad para cada dominio."""
+    
+    # Budget por industria
+    BUDGET_POR_INDUSTRIA = {
+        "financial services": (100000, 250000),
+        "banking": (100000, 250000),
+        "finance": (100000, 250000),
+        "healthcare": (75000, 200000),
+        "retail": (50000, 150000),
+        "technology": (50000, 150000),
+        "manufacturing": (30000, 100000),
+        "education": (20000, 75000),
+    }
+    
+    prioridades = []
+    scores = []
+    budgets_min = []
+    budgets_max = []
+    factores_pos = []
+    factores_neg = []
+    talking_points_list = []
+    
+    for idx, row in df.iterrows():
+        score = 50  # Base
+        f_pos = []
+        f_neg = []
+        
+        # Factor: Postura de seguridad
+        postura = row.get('postura_general', 'Intermedia')
+        if postura == 'Básica':
+            score += 25
+            f_pos.append("Gaps de seguridad evidentes = oportunidad clara")
+        elif postura == 'Avanzada':
+            score -= 15
+            f_neg.append("Postura avanzada = menor necesidad inmediata")
+        
+        # Factor: DMARC
+        dmarc = row.get('dmarc_estado', '')
+        if dmarc == 'Ausente':
+            score += 10
+            f_pos.append("Sin DMARC = vulnerabilidad de email evidente")
+        elif dmarc == 'Reject':
+            score -= 5
+            f_neg.append("DMARC en Reject = identidad protegida")
+        
+        # Factor: HSTS
+        hsts = row.get('hsts', row.get('hsts_presente', False))
+        if not hsts or hsts in ['No', 'False', '0']:
+            score += 5
+            f_pos.append("Sin HSTS = oportunidad de mejora web")
+        
+        # Factor: Industria regulada
+        industria = str(row.get('industria', '')).lower()
+        if any(ind in industria for ind in ['financ', 'bank', 'health', 'insurance']):
+            score += 15
+            f_pos.append("Industria regulada = presión de compliance")
+        
+        # Calcular prioridad
+        if score >= 75:
+            prioridad = "🔴 Crítica"
+            prioridad_num = 4
+        elif score >= 60:
+            prioridad = "🟠 Alta"
+            prioridad_num = 3
+        elif score >= 45:
+            prioridad = "🟡 Media"
+            prioridad_num = 2
+        else:
+            prioridad = "🟢 Baja"
+            prioridad_num = 1
+        
+        # Budget estimado
+        budget = BUDGET_POR_INDUSTRIA.get(industria, (25000, 100000))
+        
+        # Talking points
+        talking = generar_talking_points(row, f_pos)
+        
+        prioridades.append(prioridad)
+        scores.append(min(100, max(0, score)))
+        budgets_min.append(budget[0])
+        budgets_max.append(budget[1])
+        factores_pos.append("; ".join(f_pos) if f_pos else "")
+        factores_neg.append("; ".join(f_neg) if f_neg else "")
+        talking_points_list.append(talking)
+    
+    df['prioridad'] = prioridades
+    df['prioridad_num'] = [4 if "Crítica" in p else 3 if "Alta" in p else 2 if "Media" in p else 1 for p in prioridades]
+    df['score_oportunidad'] = scores
+    df['budget_min'] = budgets_min
+    df['budget_max'] = budgets_max
+    df['factores_positivos'] = factores_pos
+    df['factores_negativos'] = factores_neg
+    df['talking_points'] = talking_points_list
+    
+    return df
+
+
+def generar_talking_points(row: pd.Series, factores: List[str]) -> str:
+    """Genera talking points para ventas basado en el análisis."""
+    points = []
+    
+    dominio = row.get('dominio', '')
+    industria = str(row.get('industria', '')).lower()
+    postura = row.get('postura_general', '')
+    
+    if postura == 'Básica':
+        points.append(f"Detectamos oportunidades de mejora en la postura de seguridad de {dominio}")
+    
+    if 'DMARC' in str(row.get('dmarc_estado', '')).upper() or row.get('dmarc_estado') == 'Ausente':
+        points.append("La protección de identidad de email puede fortalecerse significativamente")
+    
+    if any(ind in industria for ind in ['financ', 'bank', 'insurance']):
+        points.append("El entorno regulatorio actual exige controles de seguridad robustos")
+    elif 'retail' in industria:
+        points.append("La protección de datos de clientes es crítica para la continuidad del negocio")
+    elif 'health' in industria:
+        points.append("HIPAA y regulaciones de salud requieren controles demostrados")
+    
+    if not points:
+        points.append("Podemos ayudarles a fortalecer su postura de seguridad de forma proactiva")
+    
+    return " | ".join(points)
+
+
+def mostrar_tarjeta_oportunidad(row: pd.Series, score_col: str):
+    """Muestra una tarjeta expandible con detalles de la oportunidad."""
+    dominio = row.get('dominio', 'N/A')
+    prioridad = row.get('prioridad', '🟡 Media')
+    score_op = row.get('score_oportunidad', 50)
+    empresa = row.get('empresa', dominio)
+    industria = row.get('industria', 'N/A')
+    
+    # Color según prioridad
+    color_map = {
+        "🔴 Crítica": "#e74c3c",
+        "🟠 Alta": "#e67e22", 
+        "🟡 Media": "#f39c12",
+        "🟢 Baja": "#2ecc71"
+    }
+    color = color_map.get(prioridad, "#95a5a6")
+    
+    with st.expander(f"{prioridad} **{dominio}** | Score: {score_op}/100 | {industria}", expanded=False):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown(f"**🏢 Empresa:** {empresa}")
+            st.markdown(f"**🌐 Dominio:** {dominio}")
+            st.markdown(f"**🏭 Industria:** {industria}")
+            score_seg = row.get(score_col, row.get('score', 'N/A'))
+            st.markdown(f"**🔒 Score Seguridad:** {score_seg}/100")
+        
+        with col2:
+            budget_min = row.get('budget_min', 25000)
+            budget_max = row.get('budget_max', 100000)
+            st.markdown(f"**💰 Budget Estimado:** ${budget_min:,} - ${budget_max:,} USD")
+            st.markdown(f"**📊 Postura:** {row.get('postura_general', 'N/A')}")
+            st.markdown(f"**📧 DMARC:** {row.get('dmarc_estado', 'N/A')}")
+            st.markdown(f"**🌐 HSTS:** {row.get('hsts', row.get('hsts_presente', 'N/A'))}")
+        
+        # Factores
+        f_pos = row.get('factores_positivos', '')
+        f_neg = row.get('factores_negativos', '')
+        
+        if f_pos:
+            st.success(f"✅ **Factores Positivos:** {f_pos}")
+        if f_neg:
+            st.warning(f"⚠️ **Factores Negativos:** {f_neg}")
+        
+        # Talking Points
+        talking = row.get('talking_points', '')
+        if talking:
+            st.info(f"💬 **Talking Points:** {talking}")
 
 
 if __name__ == "__main__":
