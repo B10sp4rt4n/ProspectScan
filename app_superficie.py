@@ -1873,6 +1873,34 @@ def main():
                     basica = len(df_res[df_res['postura_general'] == 'Básica'])
                     st.metric("Postura Básica", f"{basica} ({basica/len(df_res)*100:.0f}%)")
             
+            # Distribución de Vendors
+            st.markdown("#### 📧 Distribución de Servicios")
+            col_email, col_waf, col_gateway = st.columns(3)
+            
+            with col_email:
+                if 'correo_proveedor' in df_res.columns:
+                    st.markdown("**Proveedores de Email:**")
+                    vendor_counts = df_res['correo_proveedor'].value_counts().head(5)
+                    for vendor, count in vendor_counts.items():
+                        pct = count/len(df_res)*100
+                        st.markdown(f"• {vendor}: **{count}** ({pct:.0f}%)")
+            
+            with col_waf:
+                if 'cdn_waf' in df_res.columns:
+                    st.markdown("**CDN/WAF:**")
+                    waf_counts = df_res['cdn_waf'].value_counts().head(5)
+                    for waf, count in waf_counts.items():
+                        pct = count/len(df_res)*100
+                        st.markdown(f"• {waf}: **{count}** ({pct:.0f}%)")
+            
+            with col_gateway:
+                if 'correo_gateway' in df_res.columns:
+                    st.markdown("**Email Security Gateway:**")
+                    gw_counts = df_res['correo_gateway'].value_counts().head(5)
+                    for gw, count in gw_counts.items():
+                        pct = count/len(df_res)*100
+                        st.markdown(f"• {gw}: **{count}** ({pct:.0f}%)")
+            
             # ============================================================
             # CRUCE SEMÁNTICO - Priorización de Oportunidades
             # ============================================================
@@ -2106,12 +2134,28 @@ def mostrar_tarjeta_oportunidad(row: pd.Series, score_col: str):
             st.caption("_Menor = más gaps = más oportunidad_")
             st.markdown(f"**📊 Postura:** {row.get('postura_general', 'N/A')}")
         
-        # Detalles técnicos
+        # Vendors y servicios detectados
         st.markdown("---")
-        col3, col4 = st.columns(2)
+        st.markdown("**🔧 Servicios Detectados:**")
+        col3, col4, col5 = st.columns(3)
         with col3:
-            st.markdown(f"**📧 DMARC:** {row.get('dmarc_estado', 'N/A')}")
+            email_prov = row.get('correo_proveedor', 'N/A')
+            st.markdown(f"📧 **Email:** {email_prov}")
         with col4:
+            cdn_waf = row.get('cdn_waf', 'N/A')
+            st.markdown(f"🛡️ **CDN/WAF:** {cdn_waf}")
+        with col5:
+            gateway = row.get('correo_gateway', 'N/A')
+            st.markdown(f"🔒 **Gateway:** {gateway}")
+        
+        # Detalles técnicos de seguridad
+        st.markdown("---")
+        col6, col7, col8 = st.columns(3)
+        with col6:
+            st.markdown(f"**📧 DMARC:** {row.get('dmarc_estado', 'N/A')}")
+        with col7:
+            st.markdown(f"**🔐 SPF:** {row.get('spf_estado', 'N/A')}")
+        with col8:
             st.markdown(f"**🌐 HSTS:** {row.get('hsts', row.get('hsts_presente', 'N/A'))}")
         
         # Factores
