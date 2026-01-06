@@ -5,8 +5,254 @@ Compatible con OpenAI/ChatGPT para post-procesamiento.
 """
 
 import pandas as pd
+import os
 from typing import Dict, List, Optional
 from datetime import datetime
+
+# Intentar importar OpenAI (opcional)
+try:
+    from openai import OpenAI
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+
+
+def get_openai_client(api_key: Optional[str] = None) -> Optional[OpenAI]:
+    """
+    Obtiene un cliente de OpenAI configurado.
+    
+    Args:
+        api_key: API key de OpenAI. Si no se proporciona, busca en variables de entorno.
+        
+    Returns:
+        Cliente OpenAI o None si no está disponible
+    """
+    if not OPENAI_AVAILABLE:
+        return None
+    
+    key = api_key or os.getenv("OPENAI_API_KEY")
+    if not key:
+        return None
+    
+    return OpenAI(api_key=key)
+
+
+def reformular_con_openai(
+    analisis: str,
+    audiencia: str = "ejecutivo",
+    api_key: Optional[str] = None,
+    modelo: str = "gpt-4"
+) -> Optional[str]:
+    """
+    Reformula un análisis estructural para una audiencia específica usando OpenAI.
+    
+    Args:
+        analisis: Análisis estructural original
+        audiencia: Tipo de audiencia ("ejecutivo", "tecnico", "comercial")
+        api_key: API key de OpenAI
+        modelo: Modelo a usar (gpt-4, gpt-4-turbo, gpt-3.5-turbo)
+        
+    Returns:
+        Análisis reformulado o None si hay error
+    """
+    client = get_openai_client(api_key)
+    if not client:
+        return None
+    
+    # Prompts por audiencia
+    prompts = {
+        "ejecutivo": """Resume este análisis de ciberseguridad para un comité ejecutivo (C-Level).
+        Enfócate en:
+        - Riesgos críticos de negocio
+        - Impacto financiero y reputacional
+        - Recomendaciones estratégicas de alto nivel
+        - Máximo 5 bullets, lenguaje ejecutivo, sin tecnicismos.""",
+        
+        "tecnico": """Resume este análisis para un equipo técnico (CISO, IT Security).
+        Enfócate en:
+        - Controles de seguridad específicos
+        - Gaps técnicos identificados
+        - Recomendaciones de implementación
+        - Priorización por riesgo técnico.""",
+        
+        "comercial": """Reformula este análisis para un equipo de ventas/BDR.
+        Enfócate en:
+        - Oportunidades de venta específicas
+        - Pain points del prospecto
+        - Talking points para contacto inicial
+        - Urgencia y timing recomendado."""
+    }
+    
+    system_prompt = """Eres un analista de ciberseguridad experto. 
+    Reformula el análisis proporcionado SOLO con la información disponible.
+    NUNCA inventes datos, métricas o información que no esté en el análisis original.
+    Si algo no está disponible, no lo menciones."""
+    
+    try:
+        response = client.chat.completions.create(
+            model=modelo,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"{prompts.get(audiencia, prompts['ejecutivo'])}\n\nANÁLISIS:\n{analisis}"}
+            ],
+            temperature=0.3,  # Baja temperatura para ser más factual
+            max_tokens=1000
+        )
+        
+        return response.choices[0].message.content
+    
+    except Exception as e:
+        print(f"Error en OpenAI: {e}")
+        return None
+
+
+def clasificar_urgencia_con_openai(
+    analisis: str,
+    api_key: Optional[str] = None,
+    modelo: str = "gpt-4"
+) -> Optional[Dict]:
+    """
+    Clasifica la urgencia de contacto basándose en el análisis.
+    
+    Args:
+        analisis: Análisis estructural original
+        api_key: API key de OpenAI
+        modelo: Modelo a usar
+        
+    Returns:
+        Dict con clasificación o None si hay error
+    """
+    client = get_openai_client(api_key)
+    if not client:
+        return None
+    
+    system_prompt = """Eres un analista de ciberseguridad experto.
+    Clasifica la urgencia de contacto comercial basándote EXCLUSIVAMENTE en el análisis proporcionado.
+    
+    Responde en formato JSON con:
+    {
+        "urgencia": "critica|alta|media|baja",
+        "razon": "explicación breve",
+        "contactar_en": "timeframe recomendado (ej: 24-48h, esta semana, este mes)",
+        "enfoque": "principal ángulo de conversación"
+    }"""
+    
+    try:
+        response = client.chat.completions.create(
+            model=modelo,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Clasifica este análisis:\n\n{analisis}"}
+            ],
+            temperature=0.2,
+            max_tokens=300,
+            response_format={"type": "json_object"}
+        )
+        
+        import json
+        return json.loads(response.choices[0].message.content)
+    
+    except Exception as e:
+        print(f"Error en OpenAI: {e}")
+        return None
+
+
+def generar_email_prospeccion_con_openai(
+    analisis: str,
+    api_key: Optional[str] = None,
+    modelo: str = "gpt-4"
+) -> Optional[str]:
+    """
+    Genera un email de prospección inicial basado en el análisis.
+    
+    Args:
+        analisis: Análisis estructural original
+        api_key: API key de OpenAI
+        modelo: Modelo a usar
+        
+    Returns:
+        Email de prospección o None si hay error
+    """
+    client = get_openai_client(api_key)
+    if not client:
+        return None
+    
+    system_prompt = """Eres un experto en prospección B2B de ciberseguridad.
+    Genera un email de prospección inicial profesional, conciso y personalizado.
+    
+    Usa SOLO información del análisis proporcionado.
+    Estructura:
+    - Asunto: impactante, específico
+    - Apertura: referencia a hallazgo específico
+    - Valor: cómo podemos ayudar
+    - CTA: call to action suave
+    
+    Máximo 150 palabras, tono profesional pero cercano."""
+    
+    try:
+        response = client.chat.completions.create(
+            model=modelo,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"Genera email de prospección basado en:\n\n{analisis}"}
+            ],
+            temperature=0.4,
+            max_tokens=500
+        )
+        
+        return response.choices[0].message.content
+    
+    except Exception as e:
+        print(f"Error en OpenAI: {e}")
+        return None
+
+
+def procesar_batch_con_openai(
+    resultados: List[Dict],
+    accion: str = "reformular_ejecutivo",
+    api_key: Optional[str] = None,
+    modelo: str = "gpt-4"
+) -> List[Dict]:
+    """
+    Procesa múltiples análisis con OpenAI.
+    
+    Args:
+        resultados: Lista de diccionarios con análisis
+        accion: Tipo de procesamiento ("reformular_ejecutivo", "reformular_tecnico", 
+                "reformular_comercial", "clasificar", "email")
+        api_key: API key de OpenAI
+        modelo: Modelo a usar
+        
+    Returns:
+        Lista de resultados con campo adicional "openai_output"
+    """
+    if not OPENAI_AVAILABLE or not get_openai_client(api_key):
+        return resultados
+    
+    resultados_procesados = []
+    
+    for idx, r in enumerate(resultados, 1):
+        print(f"Procesando {idx}/{len(resultados)}: {r['dominio']}")
+        
+        output = None
+        
+        if accion == "reformular_ejecutivo":
+            output = reformular_con_openai(r['analisis'], "ejecutivo", api_key, modelo)
+        elif accion == "reformular_tecnico":
+            output = reformular_con_openai(r['analisis'], "tecnico", api_key, modelo)
+        elif accion == "reformular_comercial":
+            output = reformular_con_openai(r['analisis'], "comercial", api_key, modelo)
+        elif accion == "clasificar":
+            output = clasificar_urgencia_con_openai(r['analisis'], api_key, modelo)
+        elif accion == "email":
+            output = generar_email_prospeccion_con_openai(r['analisis'], api_key, modelo)
+        
+        resultado_copia = r.copy()
+        resultado_copia['openai_output'] = output
+        resultado_copia['openai_accion'] = accion
+        resultados_procesados.append(resultado_copia)
+    
+    return resultados_procesados
 
 
 def generar_analisis_estructural(fila: Dict) -> str:

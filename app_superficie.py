@@ -2361,43 +2361,241 @@ def main():
                 
                 # Guía de integración con OpenAI
                 st.markdown("---")
-                with st.expander("🤖 Guía de Integración con OpenAI/ChatGPT"):
+                st.markdown("### 🤖 Post-procesamiento con OpenAI")
+                
+                # Verificar disponibilidad de OpenAI
+                from analisis_estructural import OPENAI_AVAILABLE, get_openai_client
+                
+                # Configuración de API Key
+                with st.expander("⚙️ Configuración OpenAI", expanded=False):
                     st.markdown("""
-                    ### Cómo usar estos análisis con IA
+                    **Opciones para configurar OpenAI API Key:**
                     
-                    1. **OpenAI API (Python):**
-                    ```python
-                    import openai
+                    1. **Streamlit Secrets** (recomendado para producción):
+                       - Crea `.streamlit/secrets.toml`
+                       - Agrega: `OPENAI_API_KEY = "sk-..."`
                     
-                    analisis = resultados[0]['analisis']
+                    2. **Variable de entorno**:
+                       - Export: `export OPENAI_API_KEY="sk-..."`
                     
-                    response = openai.chat.completions.create(
-                        model="gpt-4",
-                        messages=[
-                            {"role": "system", "content": "Eres un analista de ciberseguridad."},
-                            {"role": "user", "content": f"Resume para C-Level:\\n{analisis}"}
-                        ]
+                    3. **Manual** (temporal, solo esta sesión):
+                       - Ingresa abajo
+                    """)
+                    
+                    # Intentar obtener de secrets o env
+                    api_key_default = ""
+                    try:
+                        api_key_default = st.secrets.get("OPENAI_API_KEY", "")
+                    except:
+                        api_key_default = os.getenv("OPENAI_API_KEY", "")
+                    
+                    api_key_input = st.text_input(
+                        "🔑 OpenAI API Key (opcional)",
+                        value="" if not api_key_default else "***************",
+                        type="password",
+                        help="Deja vacío si ya configuraste secrets o variable de entorno"
                     )
-                    print(response.choices[0].message.content)
-                    ```
                     
-                    2. **Azure OpenAI / Copilot Studio:**
-                       - Importa el JSON como fuente de datos
-                       - Crea flujos de trabajo automatizados
+                    # Usar la key proporcionada o la del sistema
+                    api_key_to_use = None
+                    if api_key_input and api_key_input != "***************":
+                        api_key_to_use = api_key_input
+                    elif api_key_default:
+                        api_key_to_use = api_key_default
                     
-                    3. **Prompts sugeridos:**
-                       - "Clasifica este dominio por urgencia de contacto"
-                       - "Genera un email de prospección basado en estos hallazgos"
-                       - "Identifica las 3 principales debilidades"
-                       - "Resume para audiencia técnica vs ejecutiva"
+                    # Verificar disponibilidad
+                    if OPENAI_AVAILABLE:
+                        if api_key_to_use:
+                            client_test = get_openai_client(api_key_to_use)
+                            if client_test:
+                                st.success("✅ OpenAI disponible y configurado")
+                            else:
+                                st.warning("⚠️ API Key configurada pero cliente no disponible")
+                        else:
+                            st.info("ℹ️ OpenAI disponible - configura API Key para usar")
+                    else:
+                        st.warning("⚠️ Módulo OpenAI no instalado. Instala con: `pip install openai`")
+                
+                # Opciones de post-procesamiento
+                if OPENAI_AVAILABLE and api_key_to_use:
+                    st.markdown("---")
+                    st.markdown("### 🎯 Acciones Disponibles")
                     
-                    **⚠️ Importante:** La IA nunca debe inventar datos. Solo debe:
-                    - Reformular
-                    - Resumir  
-                    - Clasificar
-                    - Priorizar
+                    col_ai1, col_ai2 = st.columns(2)
                     
-                    Basándose exclusivamente en los datos observables del análisis.
+                    with col_ai1:
+                        accion_ai = st.selectbox(
+                            "Selecciona acción:",
+                            [
+                                "reformular_ejecutivo",
+                                "reformular_tecnico",
+                                "reformular_comercial",
+                                "clasificar",
+                                "email"
+                            ],
+                            format_func=lambda x: {
+                                "reformular_ejecutivo": "📊 Resumen Ejecutivo (C-Level)",
+                                "reformular_tecnico": "🔧 Resumen Técnico (CISO/IT)",
+                                "reformular_comercial": "💼 Resumen Comercial (Sales/BDR)",
+                                "clasificar": "🎯 Clasificar Urgencia",
+                                "email": "✉️ Generar Email Prospección"
+                            }[x]
+                        )
+                    
+                    with col_ai2:
+                        modelo_ai = st.selectbox(
+                            "Modelo OpenAI:",
+                            ["gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"],
+                            index=0
+                        )
+                    
+                    # Límite de procesamiento
+                    max_procesar = min(len(resultados), 10)
+                    st.info(f"⚡ Se procesarán hasta {max_procesar} dominios por costo/tiempo")
+                    
+                    if st.button("🚀 Procesar con OpenAI", type="primary", use_container_width=True):
+                        with st.spinner(f"Procesando {max_procesar} análisis con {modelo_ai}..."):
+                            from analisis_estructural import procesar_batch_con_openai
+                            
+                            try:
+                                resultados_ai = procesar_batch_con_openai(
+                                    resultados[:max_procesar],
+                                    accion=accion_ai,
+                                    api_key=api_key_to_use,
+                                    modelo=modelo_ai
+                                )
+                                
+                                st.session_state["resultados_openai"] = resultados_ai
+                                st.success(f"✅ {len(resultados_ai)} análisis procesados con OpenAI")
+                            
+                            except Exception as e:
+                                st.error(f"❌ Error procesando con OpenAI: {e}")
+                    
+                    # Mostrar resultados de OpenAI
+                    if "resultados_openai" in st.session_state and st.session_state["resultados_openai"]:
+                        st.markdown("---")
+                        st.markdown("### 📊 Resultados OpenAI")
+                        
+                        resultados_ai = st.session_state["resultados_openai"]
+                        
+                        for idx, r in enumerate(resultados_ai, 1):
+                            with st.expander(f"🤖 {r['empresa']} ({r['dominio']}) - {r.get('openai_accion', 'N/A')}", expanded=(idx == 1)):
+                                
+                                col_orig, col_ai = st.columns(2)
+                                
+                                with col_orig:
+                                    st.markdown("**📄 Análisis Original:**")
+                                    st.text_area(
+                                        "original",
+                                        r['analisis'][:500] + "..." if len(r['analisis']) > 500 else r['analisis'],
+                                        height=200,
+                                        key=f"orig_{idx}",
+                                        label_visibility="collapsed"
+                                    )
+                                
+                                with col_ai:
+                                    st.markdown("**🤖 Resultado OpenAI:**")
+                                    output_ai = r.get('openai_output')
+                                    
+                                    if output_ai:
+                                        if isinstance(output_ai, dict):
+                                            st.json(output_ai)
+                                        else:
+                                            st.text_area(
+                                                "openai",
+                                                str(output_ai),
+                                                height=200,
+                                                key=f"ai_{idx}",
+                                                label_visibility="collapsed"
+                                            )
+                                    else:
+                                        st.warning("No se pudo procesar")
+                                
+                                # Botón de descarga individual
+                                if output_ai:
+                                    download_content = f"EMPRESA: {r['empresa']}\nDOMINIO: {r['dominio']}\n\n"
+                                    download_content += f"ANÁLISIS ORIGINAL:\n{r['analisis']}\n\n"
+                                    download_content += f"═" * 80 + "\n\n"
+                                    download_content += f"RESULTADO OPENAI ({r.get('openai_accion')}):\n"
+                                    download_content += str(output_ai) if isinstance(output_ai, str) else json.dumps(output_ai, indent=2, ensure_ascii=False)
+                                    
+                                    st.download_button(
+                                        f"📥 Descargar resultado completo",
+                                        download_content,
+                                        file_name=f"openai_{r['dominio'].replace('.', '_')}.txt",
+                                        mime="text/plain",
+                                        key=f"dl_ai_{idx}"
+                                    )
+                        
+                        # Exportar batch de OpenAI
+                        st.markdown("---")
+                        
+                        # CSV con resultados OpenAI
+                        df_ai_export = pd.DataFrame([
+                            {
+                                'empresa': r['empresa'],
+                                'dominio': r['dominio'],
+                                'analisis_original': r['analisis'],
+                                'openai_accion': r.get('openai_accion', ''),
+                                'openai_resultado': str(r.get('openai_output', ''))
+                            }
+                            for r in resultados_ai
+                        ])
+                        
+                        csv_ai = df_ai_export.to_csv(index=False, encoding="utf-8-sig")
+                        st.download_button(
+                            "📥 Exportar resultados OpenAI (CSV)",
+                            csv_ai,
+                            file_name=f"prospectscan_openai_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
+                            mime="text/csv",
+                            use_container_width=True
+                        )
+                
+                # Guía manual para quien no tenga OpenAI
+                else:
+                    with st.expander("💡 Cómo usar OpenAI manualmente"):
+                        st.markdown("""
+                        ### Guía para uso manual de OpenAI
+                        
+                        Si no tienes la API configurada, puedes usar ChatGPT web o API manualmente:
+                        
+                        **1. ChatGPT Web (chat.openai.com):**
+                        - Copia un análisis generado arriba
+                        - Pega en ChatGPT con el prompt:
+                        
+                        ```
+                        Resume este análisis de ciberseguridad para un comité ejecutivo.
+                        Enfócate en riesgos críticos de negocio y recomendaciones estratégicas.
+                        NO inventes datos que no estén en el análisis.
+                        
+                        ANÁLISIS:
+                        [pega aquí el análisis]
+                        ```
+                        
+                        **2. OpenAI API (Python):**
+                        ```python
+                        import openai
+                        
+                        analisis = "..."  # Tu análisis
+                        
+                        response = openai.chat.completions.create(
+                            model="gpt-4",
+                            messages=[
+                                {"role": "system", "content": "Eres un analista de ciberseguridad."},
+                                {"role": "user", "content": f"Resume para C-Level:\\n{analisis}"}
+                            ]
+                        )
+                        print(response.choices[0].message.content)
+                        ```
+                        
+                        **3. Azure OpenAI:**
+                        - Usa el mismo formato de mensajes
+                        - Ajusta endpoint y deployment
+                        
+                        **⚠️ Importante:** 
+                        - La IA solo debe reformular/resumir datos existentes
+                        - Nunca debe inventar métricas o información
+                        - Temperatura baja (0.2-0.3) para ser más factual
                     """)
 
 
