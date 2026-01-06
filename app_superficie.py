@@ -28,6 +28,14 @@ except ImportError:
     CACHE_AVAILABLE = False
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Tuple
+
+# Análisis Estructural
+from analisis_estructural import (
+    generar_analisis_estructural,
+    procesar_dataframe,
+    exportar_markdown,
+    exportar_txt
+)
 from enum import Enum
 from datetime import datetime
 from urllib.parse import urlparse
@@ -1441,8 +1449,14 @@ def main():
     st.set_page_config(layout="wide", page_title="ProspectScan - Diagnóstico de Seguridad")
     st.title("🧠 ProspectScan - Diagnóstico de Superficie Digital")
 
-    # Tabs: Análisis masivo vs Consulta rápida vs Pipeline Cruce
-    tab1, tab2, tab3, tab4 = st.tabs(["📁 Cargar archivo", "🔍 Dominio único", "📊 Reportes (cache)", "🎯 Pipeline Cruce"])
+    # Tabs: Análisis masivo vs Consulta rápida vs Pipeline Cruce vs Análisis Estructural
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📁 Cargar archivo", 
+        "🔍 Dominio único", 
+        "📊 Reportes (cache)", 
+        "🎯 Pipeline Cruce",
+        "📝 Análisis Estructural"
+    ])
 
     with tab1:
         # Quick Start cuando no hay archivo
@@ -2047,15 +2061,106 @@ def main():
             for idx, row in df_filtrado.iterrows():
                 mostrar_tarjeta_oportunidad(row, score_col)
             
-            # Exportar con prioridades
+            # ============================================================
+            # EXPORTAR RESULTADOS
+            # ============================================================
             st.markdown("---")
-            csv = df_filtrado.to_csv(index=False)
-            st.download_button(
-                "📥 Exportar análisis completo (CSV)",
-                csv,
-                f"prospectscan_cruce_{datetime.now().strftime('%Y%m%d')}.csv",
-                "text/csv"
-            )
+            st.markdown("### 📤 Exportar Resultados")
+            
+            col_exp1, col_exp2, col_exp3 = st.columns(3)
+            
+            with col_exp1:
+                # Exportar CSV con datos filtrados
+                csv = df_filtrado.to_csv(index=False, encoding="utf-8-sig")
+                st.download_button(
+                    "📥 CSV (Datos)",
+                    csv,
+                    f"prospectscan_cruce_{datetime.now().strftime('%Y%m%d')}.csv",
+                    "text/csv",
+                    use_container_width=True
+                )
+            
+            with col_exp2:
+                # Botón para generar análisis estructural
+                if st.button("📝 Generar Análisis Estructural", use_container_width=True):
+                    with st.spinner("Generando análisis narrativo..."):
+                        from analisis_estructural import procesar_dataframe, exportar_txt
+                        resultados = procesar_dataframe(df_filtrado)
+                        
+                        # Exportar a TXT
+                        output_txt = f"/tmp/analisis_estructural_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+                        exportar_txt(resultados, output_txt)
+                        
+                        with open(output_txt, "r", encoding="utf-8") as f:
+                            txt_content = f.read()
+                        
+                        st.success(f"✅ {len(resultados)} análisis generados")
+                        st.session_state["analisis_txt"] = txt_content
+                        st.session_state["analisis_resultados"] = resultados
+            
+            with col_exp3:
+                # Descargar análisis si existe
+                if "analisis_txt" in st.session_state:
+                    st.download_button(
+                        "📄 Descargar TXT",
+                        st.session_state["analisis_txt"],
+                        f"analisis_estructural_{datetime.now().strftime('%Y%m%d')}.txt",
+                        "text/plain",
+                        use_container_width=True
+                    )
+            
+            # ============================================================
+            # VISTA PREVIA DE ANÁLISIS ESTRUCTURAL
+            # ============================================================
+            if "analisis_resultados" in st.session_state:
+                st.markdown("---")
+                st.markdown("### 📋 Vista Previa - Análisis Estructural")
+                
+                resultados = st.session_state["analisis_resultados"]
+                
+                # Selector de dominio
+                empresas_dominios = [f"{r['empresa']} ({r['dominio']})" for r in resultados]
+                seleccion = st.selectbox(
+                    "Seleccionar organización",
+                    empresas_dominios,
+                    key="selector_analisis"
+                )
+                
+                idx = empresas_dominios.index(seleccion)
+                analisis_seleccionado = resultados[idx]
+                
+                # Mostrar análisis en expander
+                with st.expander(f"📄 Análisis: {analisis_seleccionado['empresa']}", expanded=True):
+                    st.code(analisis_seleccionado['analisis'], language=None)
+                
+                # Exportar individual en Markdown
+                col_exp4, col_exp5 = st.columns(2)
+                with col_exp4:
+                    md_content = f"# {analisis_seleccionado['empresa']}\n\n```\n{analisis_seleccionado['analisis']}\n```"
+                    st.download_button(
+                        "📝 Descargar Markdown (individual)",
+                        md_content,
+                        f"analisis_{analisis_seleccionado['dominio']}_{datetime.now().strftime('%Y%m%d')}.md",
+                        "text/markdown",
+                        use_container_width=True
+                    )
+                
+                with col_exp5:
+                    # Exportar todo en Markdown
+                    from analisis_estructural import exportar_markdown
+                    output_md = f"/tmp/analisis_estructural_batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+                    exportar_markdown(resultados, output_md)
+                    
+                    with open(output_md, "r", encoding="utf-8") as f:
+                        md_batch = f.read()
+                    
+                    st.download_button(
+                        "📚 Descargar Markdown (batch)",
+                        md_batch,
+                        f"analisis_batch_{datetime.now().strftime('%Y%m%d')}.md",
+                        "text/markdown",
+                        use_container_width=True
+                    )
 
 
 def enriquecer_con_contexto(df_postura: pd.DataFrame, df_zoom: pd.DataFrame, dominios_col: str) -> pd.DataFrame:
@@ -2284,6 +2389,232 @@ def mostrar_tarjeta_oportunidad(row: pd.Series, score_col: str):
         talking = row.get('talking_points', '')
         if talking:
             st.info(f"💬 **Talking Points:** {talking}")
+
+    # =========================================================================
+    # TAB 5: ANÁLISIS ESTRUCTURAL
+    # =========================================================================
+    with tab5:
+        st.markdown("### 📝 Generador de Análisis Estructural")
+        st.markdown("""
+        *Genera reportes narrativos automatizados basados exclusivamente en datos observables.*
+        
+        **Compatible con:**
+        - 🤖 OpenAI / ChatGPT 4.1 → 5.0
+        - 🔷 Azure OpenAI / Copilot Studio
+        - 📊 Reportes ejecutivos y técnicos
+        """)
+        
+        st.markdown("---")
+        
+        # Opciones de origen de datos
+        origen = st.radio(
+            "📂 Selecciona el origen de datos:",
+            ["Usar resultados del Pipeline Cruce", "Cargar CSV nuevo", "Usar cache de dominios"],
+            horizontal=True
+        )
+        
+        df_analisis = None
+        
+        if origen == "Usar resultados del Pipeline Cruce":
+            if "pipeline_results" in st.session_state and st.session_state["pipeline_results"] is not None:
+                df_analisis = st.session_state["pipeline_results"]
+                st.success(f"✅ {len(df_analisis)} dominios disponibles desde Pipeline Cruce")
+            else:
+                st.warning("⚠️ No hay resultados en Pipeline Cruce. Ve al tab 'Pipeline Cruce' primero.")
+        
+        elif origen == "Cargar CSV nuevo":
+            archivo_analisis = st.file_uploader(
+                "Sube el CSV exportado de ProspectScan", 
+                type=["csv"],
+                key="analisis_csv"
+            )
+            if archivo_analisis:
+                df_analisis = pd.read_csv(archivo_analisis)
+                st.success(f"✅ {len(df_analisis)} filas cargadas")
+                st.dataframe(df_analisis.head(5), use_container_width=True)
+        
+        elif origen == "Usar cache de dominios":
+            if CACHE_AVAILABLE:
+                try:
+                    df_cache, _ = get_cached_dominios([])
+                    if not df_cache.empty:
+                        df_analisis = df_cache
+                        st.success(f"✅ {len(df_analisis)} dominios en cache")
+                    else:
+                        st.warning("⚠️ Cache vacío")
+                except Exception as e:
+                    st.error(f"Error accediendo al cache: {e}")
+            else:
+                st.warning("⚠️ Cache no disponible")
+        
+        if df_analisis is not None and len(df_analisis) > 0:
+            st.markdown("---")
+            st.markdown("### ⚙️ Configuración de Generación")
+            
+            col_cfg1, col_cfg2 = st.columns(2)
+            
+            with col_cfg1:
+                # Seleccionar dominios específicos o todos
+                dominios_disponibles = df_analisis['dominio'].tolist() if 'dominio' in df_analisis.columns else []
+                
+                seleccion_mode = st.radio(
+                    "Dominios a analizar:",
+                    ["Todos", "Seleccionar específicos"],
+                    horizontal=True
+                )
+                
+                if seleccion_mode == "Seleccionar específicos" and dominios_disponibles:
+                    dominios_seleccionados = st.multiselect(
+                        "Selecciona dominios:",
+                        dominios_disponibles,
+                        default=dominios_disponibles[:5] if len(dominios_disponibles) > 5 else dominios_disponibles
+                    )
+                    df_para_analisis = df_analisis[df_analisis['dominio'].isin(dominios_seleccionados)]
+                else:
+                    df_para_analisis = df_analisis
+                    dominios_seleccionados = dominios_disponibles
+                
+                st.info(f"📋 {len(df_para_analisis)} dominios seleccionados")
+            
+            with col_cfg2:
+                formato_salida = st.selectbox(
+                    "📄 Formato de exportación:",
+                    ["Vista previa (pantalla)", "CSV con análisis", "Markdown (.md)", "Texto plano (.txt)", "JSON"]
+                )
+            
+            # Botón de generación
+            if st.button("🚀 Generar Análisis Estructural", type="primary", use_container_width=True):
+                with st.spinner("Generando análisis..."):
+                    resultados = procesar_dataframe(df_para_analisis)
+                    st.session_state["analisis_resultados"] = resultados
+                    st.success(f"✅ {len(resultados)} análisis generados")
+            
+            # Mostrar resultados
+            if "analisis_resultados" in st.session_state and st.session_state["analisis_resultados"]:
+                resultados = st.session_state["analisis_resultados"]
+                
+                st.markdown("---")
+                st.markdown("### 📊 Resultados")
+                
+                if formato_salida == "Vista previa (pantalla)":
+                    # Mostrar cada análisis en un expander
+                    for idx, r in enumerate(resultados, 1):
+                        with st.expander(f"📄 {r['empresa']} ({r['dominio']})", expanded=(idx == 1)):
+                            st.code(r['analisis'], language=None)
+                            
+                            # Botón para copiar individual
+                            st.download_button(
+                                f"📥 Descargar análisis de {r['dominio']}",
+                                r['analisis'],
+                                file_name=f"analisis_{r['dominio'].replace('.', '_')}.txt",
+                                mime="text/plain",
+                                key=f"download_{idx}"
+                            )
+                
+                elif formato_salida == "CSV con análisis":
+                    df_export = pd.DataFrame(resultados)
+                    csv_data = df_export.to_csv(index=False, encoding="utf-8-sig")
+                    
+                    st.download_button(
+                        "📥 Descargar CSV con análisis",
+                        csv_data,
+                        file_name=f"prospectscan_analisis_estructural_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                    
+                    st.dataframe(df_export[['empresa', 'dominio']], use_container_width=True)
+                
+                elif formato_salida == "Markdown (.md)":
+                    # Generar contenido Markdown
+                    md_content = f"# ProspectScan - Análisis Estructural\n\n"
+                    md_content += f"Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+                    md_content += f"Total de organizaciones: {len(resultados)}\n\n---\n\n"
+                    
+                    for idx, r in enumerate(resultados, 1):
+                        md_content += f"## {idx}. {r['empresa']} ({r['dominio']})\n\n"
+                        md_content += f"```\n{r['analisis']}\n```\n\n---\n\n"
+                    
+                    st.download_button(
+                        "📥 Descargar Markdown",
+                        md_content,
+                        file_name=f"prospectscan_analisis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.md",
+                        mime="text/markdown",
+                        use_container_width=True
+                    )
+                    
+                    with st.expander("Vista previa Markdown"):
+                        st.markdown(md_content[:3000] + "..." if len(md_content) > 3000 else md_content)
+                
+                elif formato_salida == "Texto plano (.txt)":
+                    txt_content = "═" * 80 + "\n"
+                    txt_content += "PROSPECTSCAN - ANÁLISIS ESTRUCTURAL BATCH\n"
+                    txt_content += f"Generado: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                    txt_content += f"Total: {len(resultados)} organizaciones\n"
+                    txt_content += "═" * 80 + "\n\n"
+                    
+                    for idx, r in enumerate(resultados, 1):
+                        txt_content += f"\n{'═' * 80}\n"
+                        txt_content += f"#{idx} - {r['empresa'].upper()} ({r['dominio']})\n"
+                        txt_content += "═" * 80 + "\n\n"
+                        txt_content += r['analisis'] + "\n\n"
+                    
+                    st.download_button(
+                        "📥 Descargar TXT",
+                        txt_content,
+                        file_name=f"prospectscan_analisis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                    
+                    with st.expander("Vista previa TXT"):
+                        st.code(txt_content[:3000] + "..." if len(txt_content) > 3000 else txt_content, language=None)
+                
+                elif formato_salida == "JSON":
+                    import json
+                    json_data = json.dumps(resultados, ensure_ascii=False, indent=2)
+                    
+                    st.download_button(
+                        "📥 Descargar JSON",
+                        json_data,
+                        file_name=f"prospectscan_analisis_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
+                    
+                    with st.expander("Vista previa JSON"):
+                        st.json(resultados[:3] if len(resultados) > 3 else resultados)
+                
+                # Sección para uso con OpenAI
+                st.markdown("---")
+                st.markdown("### 🤖 Integración con OpenAI / Copilot")
+                
+                with st.expander("💡 Cómo usar estos análisis con IA"):
+                    st.markdown("""
+                    **Estos análisis están diseñados para ser usados como contexto en:**
+                    
+                    1. **ChatGPT / OpenAI API:**
+                       - Usa el análisis como `system_context`
+                       - Pide: "Resume para comité ejecutivo" o "Identifica riesgos críticos"
+                    
+                    2. **Azure OpenAI / Copilot Studio:**
+                       - Importa el JSON como fuente de datos
+                       - Crea flujos de trabajo automatizados
+                    
+                    3. **Prompts sugeridos:**
+                       - "Clasifica este dominio por urgencia de contacto"
+                       - "Genera un email de prospección basado en estos hallazgos"
+                       - "Identifica las 3 principales debilidades"
+                       - "Resume para audiencia técnica vs ejecutiva"
+                    
+                    **⚠️ Importante:** La IA nunca debe inventar datos. Solo debe:
+                    - Reformular
+                    - Resumir  
+                    - Clasificar
+                    - Priorizar
+                    
+                    Basándose exclusivamente en los datos observables del análisis.
+                    """)
 
 
 if __name__ == "__main__":
