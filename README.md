@@ -101,8 +101,30 @@ PRs bienvenidos. Para cambios mayores, abre un issue primero.
 
 ---
 
-**⚡ Deploy en Streamlit Cloud:**
-1. Fork este repo
-2. Conecta tu cuenta de Streamlit Cloud
-3. Selecciona `app_superficie.py` como main file
-4. ¡Listo! Tu app estará en `https://tu-usuario-prospectscan-app-superficie-main.streamlit.app`
+## ☁️ Deploy en Streamlit Cloud
+
+### Pasos rápidos:
+1. **Fork** este repositorio a tu cuenta de GitHub
+2. Ve a [share.streamlit.io](https://share.streamlit.io) e inicia sesión
+3. Click en **"New app"**
+4. Selecciona tu repositorio fork
+5. Configura:
+   - **Main file path**: `app_superficie.py`
+   - **Python version**: 3.11 (recomendado)
+6. Click **"Deploy"**
+
+### Configurar Secrets (opcional):
+En tu app desplegada, ve a **Settings > Secrets** y añade:
+
+```toml
+# Para análisis con IA (opcional)
+OPENAI_API_KEY = "sk-proj-xxx"
+
+# Para cache persistente (opcional)  
+NEON_CONNECTION_STRING = "postgresql://..."
+```
+
+> 💡 La app funciona completamente sin secrets. OpenAI mejora los insights y Neon acelera re-análisis.
+
+### URL de tu app:
+`https://[tu-usuario]-prospectscan-[sufijo].streamlit.app`
