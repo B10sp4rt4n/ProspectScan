@@ -2085,6 +2085,10 @@ def main():
                 if st.button("📝 Generar Análisis Estructural", use_container_width=True):
                     with st.spinner("Generando análisis narrativo..."):
                         from analisis_estructural import procesar_dataframe, exportar_txt
+                        
+                        # Asegurar que existan todas las columnas necesarias
+                        df_filtrado = asegurar_columnas_analisis(df_filtrado)
+                        
                         resultados = procesar_dataframe(df_filtrado)
                         
                         # Exportar a TXT
@@ -2211,6 +2215,66 @@ def main():
                     df_cache = query_all_cached()
                     if df_cache is not None and not df_cache.empty:
                         df_analisis = df_cache
+                        
+                        # Opción para enriquecer con CSV adicional
+                        st.markdown("#### 🔗 Enriquecimiento opcional")
+                        enriquecimiento_option = st.radio(
+                            "¿Enriquecer con datos empresariales?",
+                            ["Sin enriquecimiento", "Usar datos de Pipeline Cruce", "Subir CSV de enriquecimiento"],
+                            horizontal=True,
+                            key="enriquecimiento_cache"
+                        )
+                        
+                        if enriquecimiento_option == "Usar datos de Pipeline Cruce":
+                            # Enriquecer con contexto empresarial si hay datos de ZoomInfo
+                            if "pipeline_results" in st.session_state and "df_zoom_original" in st.session_state:
+                                df_zoom = st.session_state["df_zoom_original"]
+                                # Detectar columna de dominios
+                                dominios_col = None
+                                for col in df_zoom.columns:
+                                    if 'website' in col.lower() or 'domain' in col.lower() or 'dominio' in col.lower():
+                                        dominios_col = col
+                                        break
+                                
+                                if dominios_col:
+                                    df_analisis = enriquecer_con_contexto(df_analisis, df_zoom, dominios_col)
+                                    st.info("🔗 Datos enriquecidos con información de ZoomInfo del Pipeline Cruce")
+                                else:
+                                    st.warning("⚠️ No se encontró columna de dominios en datos de ZoomInfo")
+                            else:
+                                st.warning("⚠️ No hay datos de Pipeline Cruce disponibles en la sesión")
+                        
+                        elif enriquecimiento_option == "Subir CSV de enriquecimiento":
+                            archivo_enriquecimiento = st.file_uploader(
+                                "Sube CSV con datos empresariales (debe tener columna 'dominio' o 'website')",
+                                type=["csv"],
+                                key="enriquecimiento_csv"
+                            )
+                            if archivo_enriquecimiento:
+                                try:
+                                    df_enriq = pd.read_csv(archivo_enriquecimiento)
+                                    # Detectar columna de dominios
+                                    dominios_col = None
+                                    for col in df_enriq.columns:
+                                        if 'website' in col.lower() or 'domain' in col.lower() or 'dominio' in col.lower():
+                                            dominios_col = col
+                                            break
+                                    
+                                    if dominios_col:
+                                        df_analisis = enriquecer_con_contexto(df_analisis, df_enriq, dominios_col)
+                                        st.success(f"✅ Enriquecido con {len(df_enriq)} registros del CSV")
+                                    else:
+                                        st.error("❌ No se encontró columna de dominios en el CSV (debe ser 'website', 'domain' o 'dominio')")
+                                except Exception as e:
+                                    st.error(f"Error procesando CSV de enriquecimiento: {e}")
+                        
+                        # Calcular prioridades y scores si no existen o si se enriqueció
+                        if 'prioridad' not in df_analisis.columns or 'score_oportunidad' not in df_analisis.columns:
+                            df_analisis = calcular_prioridades_cruce(df_analisis)
+                        elif enriquecimiento_option != "Sin enriquecimiento":
+                            # Recalcular si se enriqueció con nuevos datos
+                            df_analisis = calcular_prioridades_cruce(df_analisis)
+                        
                         st.success(f"✅ {len(df_analisis)} dominios en cache")
                     else:
                         st.warning("⚠️ Cache vacío. Analiza dominios primero en otras pestañas.")
@@ -2258,6 +2322,10 @@ def main():
             if st.button("🚀 Generar Análisis Estructural", type="primary", use_container_width=True):
                 with st.spinner("Generando análisis..."):
                     from analisis_estructural import procesar_dataframe
+                    
+                    # Asegurar que existan todas las columnas necesarias
+                    df_para_analisis = asegurar_columnas_analisis(df_para_analisis)
+                    
                     resultados = procesar_dataframe(df_para_analisis)
                     st.session_state["analisis_resultados_tab5"] = resultados
                     st.success(f"✅ {len(resultados)} análisis generados")
@@ -2624,6 +2692,46 @@ def enriquecer_con_contexto(df_postura: pd.DataFrame, df_zoom: pd.DataFrame, dom
                 break
     
     return df_postura
+
+
+def asegurar_columnas_analisis(df: pd.DataFrame) -> pd.DataFrame:
+    """Asegura que existan todas las columnas necesarias para el análisis estructural."""
+    columnas_requeridas = {
+        'empresa': 'N/A',
+        'dominio': 'N/A',
+        'pais': 'N/A',
+        'empleados': 'No disponible',
+        'industria': 'No disponible',
+        'revenue': 'No disponible',
+        'score': 0,
+        'postura_identidad': 'Intermedia',
+        'postura_exposicion': 'Intermedia',
+        'postura_general': 'Intermedia',
+        'correo_proveedor': 'No disponible',
+        'correo_gateway': 'No disponible',
+        'correo_envio': 'No disponible',
+        'spf_estado': 'No disponible',
+        'dmarc_estado': 'No disponible',
+        'https_estado': 'No disponible',
+        'cdn_waf': 'No disponible',
+        'hsts': False,
+        'csp': False,
+        'dominio_antiguedad': 'No disponible',
+        'prioridad': '🟡 Media',
+        'prioridad_num': 2,
+        'score_oportunidad': 50,
+        'budget_min': 25000,
+        'budget_max': 100000,
+        'factores_positivos': '',
+        'factores_negativos': '',
+        'talking_points': ''
+    }
+    
+    for columna, valor_default in columnas_requeridas.items():
+        if columna not in df.columns:
+            df[columna] = valor_default
+    
+    return df
 
 
 def calcular_prioridades_cruce(df: pd.DataFrame) -> pd.DataFrame:
